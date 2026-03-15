@@ -11,6 +11,8 @@ CLI_GEMINI_JS="$CLI_DIST/gemini.js"
 SHELL_JS="$CORE/src/tools/shell.js"
 GETPTY_JS="$CORE/src/utils/getPty.js"
 POLICYCATALOG_JS="$CORE/src/availability/policyCatalog.js"
+HANDLER_JS="$CORE/src/fallback/handler.js"
+GEMINICHAT_JS="$CORE/src/core/geminiChat.js"
 AUTH_JS="$CLI_DIST/core/auth.js"
 INITIALIZER_JS="$CLI_DIST/core/initializer.js"
 USEAUTH_JS="$CLI_DIST/ui/auth/useAuth.js"
@@ -20,6 +22,8 @@ APPCONTAINER_JS="$CLI_DIST/ui/AppContainer.js"
 [ -f "$SHELL_JS" ] || { echo "missing $SHELL_JS" >&2; exit 1; }
 [ -f "$GETPTY_JS" ] || { echo "missing $GETPTY_JS" >&2; exit 1; }
 [ -f "$POLICYCATALOG_JS" ] || { echo "missing $POLICYCATALOG_JS" >&2; exit 1; }
+[ -f "$HANDLER_JS" ] || { echo "missing $HANDLER_JS" >&2; exit 1; }
+[ -f "$GEMINICHAT_JS" ] || { echo "missing $GEMINICHAT_JS" >&2; exit 1; }
 [ -f "$AUTH_JS" ] || { echo "missing $AUTH_JS" >&2; exit 1; }
 [ -f "$INITIALIZER_JS" ] || { echo "missing $INITIALIZER_JS" >&2; exit 1; }
 [ -f "$USEAUTH_JS" ] || { echo "missing $USEAUTH_JS" >&2; exit 1; }
@@ -27,7 +31,7 @@ APPCONTAINER_JS="$CLI_DIST/ui/AppContainer.js"
 [ -f "$CLI_CONFIG_JS" ] || { echo "missing $CLI_CONFIG_JS" >&2; exit 1; }
 [ -f "$CLI_GEMINI_JS" ] || { echo "missing $CLI_GEMINI_JS" >&2; exit 1; }
 
-python3 - "$INDEX" "$SHELL_JS" "$GETPTY_JS" "$POLICYCATALOG_JS" "$AUTH_JS" "$INITIALIZER_JS" "$USEAUTH_JS" "$APPCONTAINER_JS" "$CLI_CONFIG_JS" "$CLI_GEMINI_JS" <<'PY'
+python3 - "$INDEX" "$SHELL_JS" "$GETPTY_JS" "$POLICYCATALOG_JS" "$HANDLER_JS" "$GEMINICHAT_JS" "$AUTH_JS" "$INITIALIZER_JS" "$USEAUTH_JS" "$APPCONTAINER_JS" "$CLI_CONFIG_JS" "$CLI_GEMINI_JS" <<'PY'
 from pathlib import Path
 import sys
 
@@ -35,12 +39,14 @@ index = Path(sys.argv[1])
 shell = Path(sys.argv[2])
 getpty = Path(sys.argv[3])
 policycatalog = Path(sys.argv[4])
-auth = Path(sys.argv[5])
-initializer = Path(sys.argv[6])
-useauth = Path(sys.argv[7])
-appcontainer = Path(sys.argv[8])
-cli_config = Path(sys.argv[9])
-cli_gemini = Path(sys.argv[10])
+handler = Path(sys.argv[5])
+geminichat = Path(sys.argv[6])
+auth = Path(sys.argv[7])
+initializer = Path(sys.argv[8])
+useauth = Path(sys.argv[9])
+appcontainer = Path(sys.argv[10])
+cli_config = Path(sys.argv[11])
+cli_gemini = Path(sys.argv[12])
 
 text = index.read_text()
 if text.startswith('#!/usr/bin/env -S node --no-warnings=DEP0040'):
@@ -80,11 +86,34 @@ elif alt_new in text:
 getpty.write_text(text)
 
 text = policycatalog.read_text()
+text = text.replace(
+    "const DEFAULT_CHAIN = [\n    definePolicy({ model: DEFAULT_GEMINI_MODEL }),\n    definePolicy({ model: DEFAULT_GEMINI_FLASH_MODEL, isLastResort: true }),\n];",
+    "const DEFAULT_CHAIN = [\n    definePolicy({ model: DEFAULT_GEMINI_MODEL }),\n    definePolicy({ model: DEFAULT_GEMINI_FLASH_MODEL }),\n    definePolicy({ model: DEFAULT_GEMINI_FLASH_LITE_MODEL, isLastResort: true }),\n];",
+)
 old = "        return [\n            definePolicy({ model: previewModel }),\n            definePolicy({ model: PREVIEW_GEMINI_FLASH_MODEL, isLastResort: true }),\n        ];"
 new = "        return [\n            definePolicy({\n                model: previewModel,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: PREVIEW_GEMINI_FLASH_MODEL,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: DEFAULT_GEMINI_FLASH_LITE_MODEL,\n                isLastResort: true,\n                actions: SILENT_ACTIONS,\n            }),\n        ];"
 if old in text:
     text = text.replace(old, new, 1)
 policycatalog.write_text(text)
+
+text = handler.read_text()
+text = text.replace("import { AuthType } from '../core/contentGenerator.js';\n", "")
+text = text.replace(
+    "export async function handleFallback(config, failedModel, authType, error) {\n    if (authType !== AuthType.LOGIN_WITH_GOOGLE) {\n        return null;\n    }\n",
+    "export async function handleFallback(config, failedModel, authType, error, options = {}) {\n",
+)
+text = text.replace(
+    "if (action === 'silent') {",
+    "if (action === 'silent' || options.forceSilent) {",
+)
+handler.write_text(text)
+
+text = geminichat.read_text()
+text = text.replace(
+    "const onPersistent429Callback = async (authType, error) => handleFallback(this.config, lastModelToUse, authType, error);",
+    "const onPersistent429Callback = async (authType, error) => handleFallback(this.config, lastModelToUse, authType, error, {\n            forceSilent: role === 'subagent',\n        });",
+)
+geminichat.write_text(text)
 
 text = auth.read_text()
 text = text.replace("return { authError: null, accountSuspensionInfo: null };", "return { authError: null, accountSuspensionInfo: null, authSucceeded: false };", 2)
