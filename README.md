@@ -57,3 +57,12 @@ The upstream Gemini CLI repo is large and active, but Alpine-specific fixes are 
   - `gemini-3-pro-preview -> gemini-3-flash-preview -> gemini-2.5-flash-lite`
 
 This improves reliability, but it does not increase preview quota.
+
+## License
+
+- Repository license:
+  - GPL-3.0-only
+- Upstream roots acknowledged:
+  - the operational patching here is derived from Apache-licensed Gemini CLI work
+  - see `NOTICE`
+  - see `licenses/Apache-2.0.txt`

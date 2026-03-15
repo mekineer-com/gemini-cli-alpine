@@ -1,0 +1,19 @@
+gemini-cli-alpine
+Copyright (C) 2026 Marcos / mekineer-com
+
+This repository is distributed under the GNU General Public License, version 3.
+
+Acknowledgement of upstream roots:
+- This repository exists to package, document, and reapply Alpine Linux fixes for
+  Google's Gemini CLI.
+- The upstream source fork for the actual Gemini CLI code changes is:
+  https://github.com/mekineer-com/gemini-cli
+- That upstream project, and Google's original gemini-cli project, are rooted in
+  Apache License 2.0 code.
+- Where this repository copies, adapts, or redistributes material derived from
+  Apache-licensed Gemini CLI code, the Apache 2.0 notice and license text are
+  preserved in this repository.
+
+Included upstream notice material:
+- Apache 2.0 license text: licenses/Apache-2.0.txt
+- Upstream project reference: https://github.com/google-gemini/gemini-cli
