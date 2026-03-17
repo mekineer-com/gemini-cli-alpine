@@ -123,6 +123,26 @@ text = text.replace(
     "const onPersistent429Callback = async (authType, error) => handleFallback(this.config, lastModelToUse, authType, error);",
     "const onPersistent429Callback = async (authType, error) => handleFallback(this.config, lastModelToUse, authType, error, {\n            forceSilent: role === 'subagent',\n        });",
 )
+text = text.replace(
+    "let hasToolCall = false;",
+    "let hasUsableToolCall = false;",
+)
+text = text.replace(
+    "if (content.parts.some((part) => part.functionCall)) {\n                        hasToolCall = true;\n                    }",
+    "if ((chunk.functionCalls?.length ?? 0) > 0) {\n                        hasUsableToolCall = true;\n                    }",
+)
+text = text.replace(
+    "if (responseText || hasThoughts || hasToolCall) {",
+    "if (responseText || hasThoughts || hasUsableToolCall) {",
+)
+text = text.replace(
+    "if (!hasToolCall) {\n            if (!finishReason) {\n                throw new InvalidStreamError('Model stream ended without a finish reason.', 'NO_FINISH_REASON');\n            }\n            if (finishReason === FinishReason.MALFORMED_FUNCTION_CALL) {\n                throw new InvalidStreamError('Model stream ended with malformed function call.', 'MALFORMED_FUNCTION_CALL');\n            }\n            if (finishReason === FinishReason.UNEXPECTED_TOOL_CALL) {\n                throw new InvalidStreamError('Model stream ended with unexpected tool call.', 'UNEXPECTED_TOOL_CALL');\n            }\n            if (!responseText) {\n                throw new InvalidStreamError('Model stream ended with empty response text.', 'NO_RESPONSE_TEXT');\n            }\n        }",
+    "if (finishReason === FinishReason.MALFORMED_FUNCTION_CALL) {\n            throw new InvalidStreamError('Model stream ended with malformed function call.', 'MALFORMED_FUNCTION_CALL');\n        }\n        if (finishReason === FinishReason.UNEXPECTED_TOOL_CALL) {\n            throw new InvalidStreamError('Model stream ended with unexpected tool call.', 'UNEXPECTED_TOOL_CALL');\n        }\n        if (!hasUsableToolCall) {\n            if (!finishReason) {\n                throw new InvalidStreamError('Model stream ended without a finish reason.', 'NO_FINISH_REASON');\n            }\n            if (!responseText) {\n                throw new InvalidStreamError('Model stream ended with empty response text.', 'NO_RESPONSE_TEXT');\n            }\n        }",
+)
+text = text.replace(
+    "if (!hasToolCall) {\n            if (!finishReason) {\n                throw new InvalidStreamError('Model stream ended without a finish reason.', 'NO_FINISH_REASON');\n            }\n            if (finishReason === FinishReason.MALFORMED_FUNCTION_CALL) {\n                throw new InvalidStreamError('Model stream ended with malformed function call.', 'MALFORMED_FUNCTION_CALL');\n            }\n            if (!responseText) {\n                throw new InvalidStreamError('Model stream ended with empty response text.', 'NO_RESPONSE_TEXT');\n            }\n        }",
+    "if (finishReason === FinishReason.MALFORMED_FUNCTION_CALL) {\n            throw new InvalidStreamError('Model stream ended with malformed function call.', 'MALFORMED_FUNCTION_CALL');\n        }\n        if (!hasUsableToolCall) {\n            if (!finishReason) {\n                throw new InvalidStreamError('Model stream ended without a finish reason.', 'NO_FINISH_REASON');\n            }\n            if (!responseText) {\n                throw new InvalidStreamError('Model stream ended with empty response text.', 'NO_RESPONSE_TEXT');\n            }\n        }",
+)
 geminichat.write_text(text)
 
 text = client.read_text()
