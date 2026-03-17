@@ -22,7 +22,9 @@ Current scope:
 - faster Alpine startup path
 - silent preview-model fallback:
   - `gemini-3-pro-preview`
+  - `gemini-2.5-pro`
   - `gemini-3-flash-preview`
+  - `gemini-2.5-flash`
   - `gemini-2.5-flash-lite`
 
 ## Quick Start
@@ -49,12 +51,16 @@ GEMINI_CLI_FORCE_RELAUNCH=true gemini
 
 The upstream Gemini CLI repo is large and active, but Alpine-specific fixes are unlikely to get fast attention. This repo gives Alpine users something immediately usable while the source fork stays PR-ready.
 
+Patch groups and rollback guidance:
+
+- see [`PATCH_INVENTORY.md`](PATCH_INVENTORY.md)
+
 ## Current practical model guidance
 
 - default working baseline:
   - `gemini-2.5-flash-lite`
 - preview path now degrades automatically if quota/model access fails:
-  - `gemini-3-pro-preview -> gemini-3-flash-preview -> gemini-2.5-flash-lite`
+  - `gemini-3-pro-preview -> gemini-2.5-pro -> gemini-3-flash-preview -> gemini-2.5-flash -> gemini-2.5-flash-lite`
 
 This improves reliability, but it does not increase preview quota.
 
