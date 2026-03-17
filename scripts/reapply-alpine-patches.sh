@@ -13,6 +13,8 @@ GETPTY_JS="$CORE/src/utils/getPty.js"
 POLICYCATALOG_JS="$CORE/src/availability/policyCatalog.js"
 HANDLER_JS="$CORE/src/fallback/handler.js"
 GEMINICHAT_JS="$CORE/src/core/geminiChat.js"
+CLIENT_JS="$CORE/src/core/client.js"
+TOOLEXECUTOR_JS="$CORE/src/scheduler/tool-executor.js"
 AUTH_JS="$CLI_DIST/core/auth.js"
 INITIALIZER_JS="$CLI_DIST/core/initializer.js"
 USEAUTH_JS="$CLI_DIST/ui/auth/useAuth.js"
@@ -24,6 +26,8 @@ APPCONTAINER_JS="$CLI_DIST/ui/AppContainer.js"
 [ -f "$POLICYCATALOG_JS" ] || { echo "missing $POLICYCATALOG_JS" >&2; exit 1; }
 [ -f "$HANDLER_JS" ] || { echo "missing $HANDLER_JS" >&2; exit 1; }
 [ -f "$GEMINICHAT_JS" ] || { echo "missing $GEMINICHAT_JS" >&2; exit 1; }
+[ -f "$CLIENT_JS" ] || { echo "missing $CLIENT_JS" >&2; exit 1; }
+[ -f "$TOOLEXECUTOR_JS" ] || { echo "missing $TOOLEXECUTOR_JS" >&2; exit 1; }
 [ -f "$AUTH_JS" ] || { echo "missing $AUTH_JS" >&2; exit 1; }
 [ -f "$INITIALIZER_JS" ] || { echo "missing $INITIALIZER_JS" >&2; exit 1; }
 [ -f "$USEAUTH_JS" ] || { echo "missing $USEAUTH_JS" >&2; exit 1; }
@@ -31,7 +35,7 @@ APPCONTAINER_JS="$CLI_DIST/ui/AppContainer.js"
 [ -f "$CLI_CONFIG_JS" ] || { echo "missing $CLI_CONFIG_JS" >&2; exit 1; }
 [ -f "$CLI_GEMINI_JS" ] || { echo "missing $CLI_GEMINI_JS" >&2; exit 1; }
 
-python3 - "$INDEX" "$SHELL_JS" "$GETPTY_JS" "$POLICYCATALOG_JS" "$HANDLER_JS" "$GEMINICHAT_JS" "$AUTH_JS" "$INITIALIZER_JS" "$USEAUTH_JS" "$APPCONTAINER_JS" "$CLI_CONFIG_JS" "$CLI_GEMINI_JS" <<'PY'
+python3 - "$INDEX" "$SHELL_JS" "$GETPTY_JS" "$POLICYCATALOG_JS" "$HANDLER_JS" "$GEMINICHAT_JS" "$CLIENT_JS" "$TOOLEXECUTOR_JS" "$AUTH_JS" "$INITIALIZER_JS" "$USEAUTH_JS" "$APPCONTAINER_JS" "$CLI_CONFIG_JS" "$CLI_GEMINI_JS" <<'PY'
 from pathlib import Path
 import sys
 
@@ -41,12 +45,14 @@ getpty = Path(sys.argv[3])
 policycatalog = Path(sys.argv[4])
 handler = Path(sys.argv[5])
 geminichat = Path(sys.argv[6])
-auth = Path(sys.argv[7])
-initializer = Path(sys.argv[8])
-useauth = Path(sys.argv[9])
-appcontainer = Path(sys.argv[10])
-cli_config = Path(sys.argv[11])
-cli_gemini = Path(sys.argv[12])
+client = Path(sys.argv[7])
+toolexecutor = Path(sys.argv[8])
+auth = Path(sys.argv[9])
+initializer = Path(sys.argv[10])
+useauth = Path(sys.argv[11])
+appcontainer = Path(sys.argv[12])
+cli_config = Path(sys.argv[13])
+cli_gemini = Path(sys.argv[14])
 
 text = index.read_text()
 if text.startswith('#!/usr/bin/env -S node --no-warnings=DEP0040'):
@@ -114,6 +120,30 @@ text = text.replace(
     "const onPersistent429Callback = async (authType, error) => handleFallback(this.config, lastModelToUse, authType, error, {\n            forceSilent: role === 'subagent',\n        });",
 )
 geminichat.write_text(text)
+
+text = client.read_text()
+text = text.replace(
+    "        if (this.config.getContinueOnFailedApiCall() &&\n            isGemini2Model(modelToUse)) {",
+    "        if (this.config.getContinueOnFailedApiCall()) {",
+)
+text = text.replace('if (isInvalidStreamRetry) {', 'if (isInvalidStreamRetry >= 3) {')
+text = text.replace(
+    "turn = yield* this.sendMessageStream(nextRequest, signal, prompt_id, boundedTurns - 1, true, displayContent);",
+    "turn = yield* this.sendMessageStream(nextRequest, signal, prompt_id, boundedTurns - 1, isInvalidStreamRetry + 1, displayContent);",
+)
+text = text.replace(
+    "async *sendMessageStream(request, signal, prompt_id, turns = MAX_TURNS, isInvalidStreamRetry = false, displayContent) {",
+    "async *sendMessageStream(request, signal, prompt_id, turns = MAX_TURNS, isInvalidStreamRetry = 0, displayContent) {",
+)
+text = text.replace('if (!isInvalidStreamRetry) {', 'if (isInvalidStreamRetry === 0) {')
+client.write_text(text)
+
+text = toolexecutor.read_text()
+text = text.replace(
+    "if (typeof content === 'string' && toolName === SHELL_TOOL_NAME) {",
+    "if (typeof content === 'string') {",
+)
+toolexecutor.write_text(text)
 
 text = auth.read_text()
 text = text.replace("return { authError: null, accountSuspensionInfo: null };", "return { authError: null, accountSuspensionInfo: null, authSucceeded: false };", 2)
