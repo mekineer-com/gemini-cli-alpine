@@ -126,10 +126,15 @@ text = text.replace(
     "        if (this.config.getContinueOnFailedApiCall() &&\n            isGemini2Model(modelToUse)) {",
     "        if (this.config.getContinueOnFailedApiCall()) {",
 )
-text = text.replace('if (isInvalidStreamRetry) {', 'if (isInvalidStreamRetry >= 3) {')
+text = text.replace('if (isInvalidStreamRetry) {', 'if (isInvalidStreamRetry >= 5) {')
+text = text.replace('if (isInvalidStreamRetry >= 3) {', 'if (isInvalidStreamRetry >= 5) {')
 text = text.replace(
     "turn = yield* this.sendMessageStream(nextRequest, signal, prompt_id, boundedTurns - 1, true, displayContent);",
     "turn = yield* this.sendMessageStream(nextRequest, signal, prompt_id, boundedTurns - 1, isInvalidStreamRetry + 1, displayContent);",
+)
+text = text.replace(
+    "const nextRequest = [{ text: 'System: Please continue.' }];",
+    "const nextRequest = [{ text: 'System: Your previous response ended empty or malformed. Continue the same task without restarting, and if you use tools, emit a complete valid tool call.' }];",
 )
 text = text.replace(
     "async *sendMessageStream(request, signal, prompt_id, turns = MAX_TURNS, isInvalidStreamRetry = false, displayContent) {",
