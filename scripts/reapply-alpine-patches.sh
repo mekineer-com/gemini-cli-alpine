@@ -40,6 +40,7 @@ APPCONTAINER_JS="$CLI_DIST/ui/AppContainer.js"
 python3 - "$INDEX" "$SHELL_JS" "$GETPTY_JS" "$POLICYCATALOG_JS" "$HANDLER_JS" "$GEMINICHAT_JS" "$CLIENT_JS" "$TOOLEXECUTOR_JS" "$AUTH_JS" "$INITIALIZER_JS" "$USEAUTH_JS" "$APPCONTAINER_JS" "$CLI_CONFIG_JS" "$CLI_GEMINI_JS" "$CLI_NONINTERACTIVE_JS" <<'PY'
 from pathlib import Path
 import sys
+import re
 
 index = Path(sys.argv[1])
 shell = Path(sys.argv[2])
@@ -56,6 +57,13 @@ appcontainer = Path(sys.argv[12])
 cli_config = Path(sys.argv[13])
 cli_gemini = Path(sys.argv[14])
 cli_noninteractive = Path(sys.argv[15])
+
+def replace_once_or_skip(text, old, new):
+    if new in text:
+        return text
+    if old in text:
+        return text.replace(old, new, 1)
+    return text
 
 text = index.read_text()
 if text.startswith('#!/usr/bin/env -S node --no-warnings=DEP0040'):
@@ -192,20 +200,30 @@ text = text.replace(
 toolexecutor.write_text(text)
 
 text = auth.read_text()
-text = text.replace("return { authError: null, accountSuspensionInfo: null };", "return { authError: null, accountSuspensionInfo: null, authSucceeded: false };", 2)
-text = text.replace(
-    "                },\n            };",
-    "                },\n                authSucceeded: false,\n            };",
-    1,
+text = replace_once_or_skip(
+    text,
+    "        return { authError: null, accountSuspensionInfo: null };",
+    "        return { authError: null, accountSuspensionInfo: null, authSucceeded: false };",
 )
-text = text.replace(
+text = replace_once_or_skip(
+    text,
+    "            return { authError: null, accountSuspensionInfo: null };",
+    "            return { authError: null, accountSuspensionInfo: null, authSucceeded: false };",
+)
+text = replace_once_or_skip(
+    text,
+    "            return {\n                authError: null,\n                accountSuspensionInfo: {\n                    message: suspendedError.message,\n                    appealUrl: suspendedError.appealUrl,\n                    appealLinkText: suspendedError.appealLinkText,\n                },\n            };",
+    "            return {\n                authError: null,\n                accountSuspensionInfo: {\n                    message: suspendedError.message,\n                    appealUrl: suspendedError.appealUrl,\n                    appealLinkText: suspendedError.appealLinkText,\n                },\n                authSucceeded: false,\n            };",
+)
+text = replace_once_or_skip(
+    text,
     "        return {\n            authError: `Failed to login. Message: ${getErrorMessage(e)}`,\n            accountSuspensionInfo: null,\n        };",
     "        return {\n            authError: `Failed to login. Message: ${getErrorMessage(e)}`,\n            accountSuspensionInfo: null,\n            authSucceeded: false,\n        };",
 )
-text = text.replace(
+text = replace_once_or_skip(
+    text,
     "    return { authError: null, accountSuspensionInfo: null };",
     "    return { authError: null, accountSuspensionInfo: null, authSucceeded: true };",
-    1,
 )
 auth.write_text(text)
 
@@ -237,23 +255,75 @@ appcontainer.write_text(text)
 text = cli_config.read_text()
 old = "export async function loadCliConfig(settings, sessionId, argv, options = {}) {\n    const { cwd = process.cwd(), projectHooks } = options;"
 new = "export async function loadCliConfig(settings, sessionId, argv, options = {}) {\n    const { cwd = process.cwd(), projectHooks, skipMemoryLoad = false, skipExtensionLoad = false } = options;"
-if old in text:
-    text = text.replace(old, new, 1)
-text = text.replace("    await extensionManager.loadExtensions();\n", "    if (!skipExtensionLoad) {\n        await extensionManager.loadExtensions();\n    }\n", 1)
-if "const extensionPlanSettings = skipExtensionLoad" not in text:
-    text = text.replace("    const experimentalJitContext = settings.experimental?.jitContext ?? false;\n", "    const extensionPlanSettings = skipExtensionLoad\n        ? undefined\n        : extensionManager\n            .getExtensions()\n            .find((ext) => ext.isActive && ext.plan?.directory)?.plan;\n    const experimentalJitContext = settings.experimental?.jitContext ?? false;\n", 1)
-text = text.replace("    if (!experimentalJitContext) {\n", "    if (!skipMemoryLoad && !experimentalJitContext) {\n", 1)
+text = replace_once_or_skip(text, old, new)
+
+# Normalize loadExtensions guard to one canonical block even if older runs nested it.
+text = re.sub(
+    r"(?ms)^[ \t]*if \(!skipExtensionLoad\) \{\n(?:[ \t]*if \(!skipExtensionLoad\) \{\n)*[ \t]*await extensionManager\.loadExtensions\(\);\n(?:[ \t]*\}\n)+",
+    "    if (!skipExtensionLoad) {\n        await extensionManager.loadExtensions();\n    }\n",
+    text,
+    count=1,
+)
+if "    if (!skipExtensionLoad) {\n        await extensionManager.loadExtensions();\n    }\n" not in text:
+    text = replace_once_or_skip(
+        text,
+        "    await extensionManager.loadExtensions();\n",
+        "    if (!skipExtensionLoad) {\n        await extensionManager.loadExtensions();\n    }\n",
+    )
+
+# Keep exactly one extensionPlanSettings declaration in a canonical form.
+experimental_line = "    const experimentalJitContext = settings.experimental?.jitContext ?? false;\n"
+canonical_extension_plan = (
+    "    const extensionPlanSettings = skipExtensionLoad\n"
+    "        ? undefined\n"
+    "        : extensionManager\n"
+    "            .getExtensions()\n"
+    "            .find((ext) => ext.isActive && ext.plan?.directory)?.plan;\n"
+)
+if experimental_line in text:
+    before, after = text.split(experimental_line, 1)
+    before = re.sub(r"\n[ \t]*const extensionPlanSettings =[\s\S]*?;\n", "\n", before)
+    before = before.rstrip() + "\n" + canonical_extension_plan
+    text = before + experimental_line + after
+
+text = replace_once_or_skip(
+    text,
+    "    if (!experimentalJitContext) {\n",
+    "    if (!skipMemoryLoad && !experimentalJitContext) {\n",
+)
 cli_config.write_text(text)
 
 text = cli_gemini.read_text()
 old = "    const partialConfig = await loadCliConfig(settings.merged, sessionId, argv, {\n        projectHooks: settings.workspace.settings.hooks,\n    });"
 new = "    const partialConfig = await loadCliConfig(settings.merged, sessionId, argv, {\n        projectHooks: settings.workspace.settings.hooks,\n        skipMemoryLoad: true,\n        skipExtensionLoad: true,\n    });"
-if old in text:
-    text = text.replace(old, new, 1)
-if "const shouldPreAuthenticate = !settings.merged.security.auth.useExternal" not in text:
-    text = text.replace("    adminControlsListner.setConfig(partialConfig);\n", "    adminControlsListner.setConfig(partialConfig);\n    const sandboxConfig = await loadSandboxConfig(settings.merged, argv);\n    const shouldPreAuthenticate = !settings.merged.security.auth.useExternal &&\n        (!!sandboxConfig || !process.env['GEMINI_CLI_NO_RELAUNCH']);\n", 1)
-    text = text.replace("    if (!settings.merged.security.auth.useExternal) {\n", "    if (shouldPreAuthenticate) {\n", 1)
-    text = text.replace("        const sandboxConfig = await loadSandboxConfig(settings.merged, argv);\n", "", 1)
+text = replace_once_or_skip(text, old, new)
+
+anchor = "    adminControlsListner.setConfig(partialConfig);\n"
+canonical_preauth_block = (
+    "    adminControlsListner.setConfig(partialConfig);\n"
+    "    const sandboxConfig = await loadSandboxConfig(settings.merged, argv);\n"
+    "    const shouldPreAuthenticate = !settings.merged.security.auth.useExternal &&\n"
+    "        (!!sandboxConfig || !process.env['GEMINI_CLI_NO_RELAUNCH']);\n"
+)
+
+# Keep exactly one sandboxConfig/shouldPreAuthenticate pair after adminControlsListner.setConfig.
+pattern = (
+    r"    adminControlsListner\.setConfig\(partialConfig\);\n"
+    r"(?:    const sandboxConfig = await loadSandboxConfig\(settings\.merged, argv\);\n"
+    r"    const shouldPreAuthenticate = !settings\.merged\.security\.auth\.useExternal &&\n"
+    r"        \(\!\!sandboxConfig \|\| !process\.env\['GEMINI_CLI_NO_RELAUNCH'\]\);\n)+"
+)
+if re.search(pattern, text):
+    text = re.sub(pattern, canonical_preauth_block, text, count=1)
+elif anchor in text:
+    text = text.replace(anchor, canonical_preauth_block, 1)
+
+text = replace_once_or_skip(
+    text,
+    "    if (!settings.merged.security.auth.useExternal) {\n",
+    "    if (shouldPreAuthenticate) {\n",
+)
+text = text.replace("        const sandboxConfig = await loadSandboxConfig(settings.merged, argv);\n", "", 1)
 cli_gemini.write_text(text)
 
 text = cli_noninteractive.read_text()
