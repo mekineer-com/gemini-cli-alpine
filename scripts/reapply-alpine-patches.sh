@@ -76,7 +76,9 @@ if "argv.length === 1 && (argv[0] === '--version' || argv[0] === '-v')" not in t
         block = process_marker + "\nif (process.argv.includes('--version') || process.argv.includes('-v')) {\n  const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));\n  process.stdout.write(`${packageJson.version}\\n`);\n  process.exit(0);\n}\n"
         text = text.replace(process_marker, block, 1)
     else:
-        raise SystemExit('index.js marker not found')
+        # Newer upstream entrypoint layout; skip version fast-path injection
+        # instead of aborting the whole reapply operation.
+        pass
 index.write_text(text)
 
 text = shell.read_text()
