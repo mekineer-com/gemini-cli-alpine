@@ -35,6 +35,10 @@ These preserve functionality while improving reliability under real workloads.
 - What: avoid heavy extension/memory loading in pre-auth path; preserve auth state on startup.
 - Effect: less startup friction and fewer auth/startup dead ends on Alpine.
 
+5. Noninteractive error-output ordering fix
+- What: handle noninteractive errors before unsubscribing `UserFeedback` listeners.
+- Effect: avoids silent `exit 1` in JSON/headless flows when a turn fails mid-stream.
+
 ## Optional
 
 These are behavior choices, not compatibility fixes.

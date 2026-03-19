@@ -8,6 +8,7 @@ CORE="$ROOT/node_modules/@google/gemini-cli-core/dist"
 CLI_DIST="$ROOT/dist/src"
 CLI_CONFIG_JS="$CLI_DIST/config/config.js"
 CLI_GEMINI_JS="$CLI_DIST/gemini.js"
+CLI_NONINTERACTIVE_JS="$CLI_DIST/nonInteractiveCli.js"
 SHELL_JS="$CORE/src/tools/shell.js"
 GETPTY_JS="$CORE/src/utils/getPty.js"
 POLICYCATALOG_JS="$CORE/src/availability/policyCatalog.js"
@@ -34,8 +35,9 @@ APPCONTAINER_JS="$CLI_DIST/ui/AppContainer.js"
 [ -f "$APPCONTAINER_JS" ] || { echo "missing $APPCONTAINER_JS" >&2; exit 1; }
 [ -f "$CLI_CONFIG_JS" ] || { echo "missing $CLI_CONFIG_JS" >&2; exit 1; }
 [ -f "$CLI_GEMINI_JS" ] || { echo "missing $CLI_GEMINI_JS" >&2; exit 1; }
+[ -f "$CLI_NONINTERACTIVE_JS" ] || { echo "missing $CLI_NONINTERACTIVE_JS" >&2; exit 1; }
 
-python3 - "$INDEX" "$SHELL_JS" "$GETPTY_JS" "$POLICYCATALOG_JS" "$HANDLER_JS" "$GEMINICHAT_JS" "$CLIENT_JS" "$TOOLEXECUTOR_JS" "$AUTH_JS" "$INITIALIZER_JS" "$USEAUTH_JS" "$APPCONTAINER_JS" "$CLI_CONFIG_JS" "$CLI_GEMINI_JS" <<'PY'
+python3 - "$INDEX" "$SHELL_JS" "$GETPTY_JS" "$POLICYCATALOG_JS" "$HANDLER_JS" "$GEMINICHAT_JS" "$CLIENT_JS" "$TOOLEXECUTOR_JS" "$AUTH_JS" "$INITIALIZER_JS" "$USEAUTH_JS" "$APPCONTAINER_JS" "$CLI_CONFIG_JS" "$CLI_GEMINI_JS" "$CLI_NONINTERACTIVE_JS" <<'PY'
 from pathlib import Path
 import sys
 
@@ -53,6 +55,7 @@ useauth = Path(sys.argv[11])
 appcontainer = Path(sys.argv[12])
 cli_config = Path(sys.argv[13])
 cli_gemini = Path(sys.argv[14])
+cli_noninteractive = Path(sys.argv[15])
 
 text = index.read_text()
 if text.startswith('#!/usr/bin/env -S node --no-warnings=DEP0040'):
@@ -250,6 +253,13 @@ if "const shouldPreAuthenticate = !settings.merged.security.auth.useExternal" no
     text = text.replace("    if (!settings.merged.security.auth.useExternal) {\n", "    if (shouldPreAuthenticate) {\n", 1)
     text = text.replace("        const sandboxConfig = await loadSandboxConfig(settings.merged, argv);\n", "", 1)
 cli_gemini.write_text(text)
+
+text = cli_noninteractive.read_text()
+text = text.replace(
+    "        catch (error) {\n            errorToHandle = error;\n        }\n        finally {\n            // Cleanup stdin cancellation before other cleanup\n            cleanupStdinCancellation();\n            consolePatcher.cleanup();\n            coreEvents.off(CoreEvent.UserFeedback, handleUserFeedback);\n        }\n        if (errorToHandle) {\n            handleError(errorToHandle, config);\n        }",
+    "        catch (error) {\n            errorToHandle = error;\n            handleError(errorToHandle, config);\n        }\n        finally {\n            // Cleanup stdin cancellation before other cleanup\n            cleanupStdinCancellation();\n            consolePatcher.cleanup();\n            coreEvents.off(CoreEvent.UserFeedback, handleUserFeedback);\n        }",
+)
+cli_noninteractive.write_text(text)
 PY
 
 echo "patched $ROOT"
