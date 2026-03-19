@@ -48,6 +48,12 @@ These are behavior choices, not compatibility fixes.
 - Effect: controls preference between capability and resilience during fallback.
 - Can be changed without affecting Alpine compatibility.
 
+2. Diagnostics wrapper/tooling
+- What: launcher wrapper with per-run logs + optional Node crash-report flags, and `gemini-diag-last`.
+- How to enable: `./scripts/reapply-alpine-patches.sh [PREFIX] --with-diagnostics`
+- How to install only diagnostics: `./scripts/install-gemini-diagnostics.sh [PREFIX]`
+- Effect: easier postmortem debugging without changing core Alpine compatibility patches.
+
 ## Stock-Like Profile
 
 If you want to stay close to stock while remaining Alpine-safe:

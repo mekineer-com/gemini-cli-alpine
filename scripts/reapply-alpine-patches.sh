@@ -1,7 +1,34 @@
 #!/bin/sh
 set -eu
 
-PREFIX=${1:-$HOME/.local}
+PREFIX="$HOME/.local"
+PREFIX_SET=0
+INSTALL_DIAGNOSTICS=0
+
+for arg in "$@"; do
+  case "$arg" in
+    --with-diagnostics)
+      INSTALL_DIAGNOSTICS=1
+      ;;
+    --without-diagnostics)
+      INSTALL_DIAGNOSTICS=0
+      ;;
+    -h|--help)
+      echo "Usage: $0 [PREFIX] [--with-diagnostics|--without-diagnostics]"
+      echo "Default: apply Alpine patches only (diagnostics not installed)."
+      exit 0
+      ;;
+    *)
+      if [ "$PREFIX_SET" -eq 1 ]; then
+        echo "unexpected extra argument: $arg" >&2
+        exit 2
+      fi
+      PREFIX="$arg"
+      PREFIX_SET=1
+      ;;
+  esac
+done
+
 ROOT="$PREFIX/lib/node_modules/@google/gemini-cli"
 INDEX="$ROOT/dist/index.js"
 CORE="$ROOT/node_modules/@google/gemini-cli-core/dist"
@@ -87,6 +114,29 @@ if "argv.length === 1 && (argv[0] === '--version' || argv[0] === '-v')" not in t
         # Newer upstream entrypoint layout; skip version fast-path injection
         # instead of aborting the whole reapply operation.
         pass
+
+text = replace_once_or_skip(
+    text,
+    "const [{ main }, { FatalError, writeToStderr }, { runExitCleanup }] =\n    await Promise.all([\n        import('./src/gemini.js'),\n        import('@google/gemini-cli-core'),\n        import('./src/utils/cleanup.js'),\n    ]);\n// --- Global Entry Point ---\n",
+    "const [{ main }, { FatalError, writeToStderr }, { runExitCleanup }] =\n    await Promise.all([\n        import('./src/gemini.js'),\n        import('@google/gemini-cli-core'),\n        import('./src/utils/cleanup.js'),\n    ]);\nconst cliArgs = process.argv.slice(2);\nconst isLikelyInteractiveSession = process.stdin.isTTY &&\n    process.stdout.isTTY &&\n    !cliArgs.includes('-p') &&\n    !cliArgs.includes('--prompt');\nlet didAutoRecoverInteractive = false;\n// --- Global Entry Point ---\n",
+)
+if "didAutoRecoverInteractive" not in text:
+    marker = "// --- Global Entry Point ---\n"
+    block = (
+        "const cliArgs = process.argv.slice(2);\n"
+        "const isLikelyInteractiveSession = process.stdin.isTTY &&\n"
+        "    process.stdout.isTTY &&\n"
+        "    !cliArgs.includes('-p') &&\n"
+        "    !cliArgs.includes('--prompt');\n"
+        "let didAutoRecoverInteractive = false;\n"
+        "// --- Global Entry Point ---\n"
+    )
+    text = text.replace(marker, block, 1)
+text = replace_once_or_skip(
+    text,
+    "    if (error instanceof FatalError) {\n",
+    "    if (isLikelyInteractiveSession &&\n        !didAutoRecoverInteractive &&\n        !(error instanceof FatalError)) {\n        didAutoRecoverInteractive = true;\n        writeToStderr('Gemini hit an unexpected error. Retrying interactive session once...\\n');\n        try {\n            await main();\n            return;\n        }\n        catch (retryError) {\n            error = retryError;\n            writeToStderr('Automatic retry failed. Exiting.\\n');\n        }\n    }\n    if (error instanceof FatalError) {\n",
+)
 index.write_text(text)
 
 text = shell.read_text()
@@ -324,6 +374,12 @@ text = replace_once_or_skip(
     "    if (shouldPreAuthenticate) {\n",
 )
 text = text.replace("        const sandboxConfig = await loadSandboxConfig(settings.merged, argv);\n", "", 1)
+
+text = replace_once_or_skip(
+    text,
+    "        if (config.isInteractive()) {\n            await startInteractiveUI(config, settings, startupWarnings, process.cwd(), resumedSessionData, initializationResult);\n            return;\n        }\n",
+    "        if (config.isInteractive()) {\n            const renderInteractiveUi = async () => startInteractiveUI(config, settings, startupWarnings, process.cwd(), resumedSessionData, initializationResult);\n            try {\n                await renderInteractiveUi();\n                return;\n            }\n            catch (error) {\n                const message = error instanceof Error ? error.message : String(error ?? 'Unknown');\n                coreEvents.emitFeedback('error', `Interactive session failed: ${message}`);\n                writeToStderr(`Interactive session failed: ${message}\\n`);\n                writeToStderr('Retrying interactive session once...\\n');\n                debugLogger.error('Interactive session failed (first attempt)', error);\n            }\n            try {\n                await renderInteractiveUi();\n                return;\n            }\n            catch (error) {\n                const message = error instanceof Error ? error.message : String(error ?? 'Unknown');\n                coreEvents.emitFeedback('error', `Interactive session failed again: ${message}`);\n                writeToStderr(`Interactive session failed again: ${message}\\n`);\n                writeToStderr('Gemini CLI is exiting after repeated interactive startup failure.\\n');\n                debugLogger.error('Interactive session failed (second attempt)', error);\n                await runExitCleanup();\n                process.exit(1);\n            }\n        }\n",
+)
 cli_gemini.write_text(text)
 
 text = cli_noninteractive.read_text()
@@ -333,5 +389,13 @@ text = text.replace(
 )
 cli_noninteractive.write_text(text)
 PY
+
+# Install diagnostics only when explicitly requested.
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+if [ "$INSTALL_DIAGNOSTICS" -eq 1 ]; then
+  "$SCRIPT_DIR/install-gemini-diagnostics.sh" "$PREFIX"
+else
+  echo "diagnostics not installed (use --with-diagnostics to enable)"
+fi
 
 echo "patched $ROOT"

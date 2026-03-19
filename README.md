@@ -39,7 +39,25 @@ User-local install:
 Reapply patches after reinstall:
 
 ```sh
-./scripts/reapply-alpine-patches.sh
+./scripts/reapply-alpine-patches.sh [PREFIX]
+```
+
+Reapply patches and also install diagnostics wrapper/helper:
+
+```sh
+./scripts/reapply-alpine-patches.sh [PREFIX] --with-diagnostics
+```
+
+Install diagnostics only (no patch reapply):
+
+```sh
+./scripts/install-gemini-diagnostics.sh [PREFIX]
+```
+
+Read latest diagnostics quickly:
+
+```sh
+gemini-diag-last
 ```
 
 Force old parent/child relaunch behavior for debugging:
