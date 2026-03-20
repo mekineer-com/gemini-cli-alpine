@@ -27,6 +27,7 @@ LAUNCH_LOG="$DIAG_ROOT/launcher.log"
 LATEST_LINK="$DIAG_ROOT/latest.log"
 SAMPLE_SEC="${GEMINI_DIAG_SAMPLE_SEC:-2}"
 MAX_RSS_MB="${GEMINI_MAX_RSS_MB:-0}"
+ENABLE_RSS="${GEMINI_DIAG_ENABLE_RSS:-0}"
 
 if [ ! -f "$TARGET" ]; then
   echo "gemini wrapper: target missing: $TARGET" >&2
@@ -163,11 +164,18 @@ if [ -t 0 ] && [ -t 1 ] && [ "$is_interactive" -eq 1 ]; then
 fi
 
 start_ts=$(date +%s)
-run_cmd_sampled "$@"
+if [ "$ENABLE_RSS" -eq 1 ] 2>/dev/null; then
+  run_cmd_sampled "$@"
+else
+  run_cmd_foreground "$@"
+fi
 rc=$?
 end_ts=$(date +%s)
 dur=$((end_ts - start_ts))
 log_event "noninteractive_exit rc=$rc dur=${dur}s args=$*"
+if [ "$rc" -ne 0 ]; then
+  log_event "noninteractive_failed rc=$rc"
+fi
 exit "$rc"
 EOS
 chmod +x "$WRAPPER"
@@ -182,11 +190,18 @@ REPORT_DIR="$DIAG_ROOT/reports"
 echo "Diagnostics root: $DIAG_ROOT"
 latest_target=""
 newest_run=""
-if [ -L "$LATEST_LINK" ] || [ -f "$LATEST_LINK" ]; then
-  latest_target=$(readlink "$LATEST_LINK" 2>/dev/null || true)
-fi
+last_failed=""
 if [ -d "$RUNS_DIR" ]; then
   newest_run=$(ls -1t "$RUNS_DIR"/*.log 2>/dev/null | head -n 1 || true)
+  for f in $(ls -1t "$RUNS_DIR"/*.log 2>/dev/null); do
+    if grep -qE '(child_exit.*rc=[1-9][0-9]*|interactive_exit rc=[1-9][0-9]*|interactive_failed rc=[1-9][0-9]*|noninteractive_failed rc=[1-9][0-9]*)' "$f"; then
+      last_failed="$f"
+      break
+    fi
+  done
+fi
+if [ -L "$LATEST_LINK" ] || [ -f "$LATEST_LINK" ]; then
+  latest_target=$(readlink "$LATEST_LINK" 2>/dev/null || true)
 fi
 if [ -n "$latest_target" ]; then
   echo "Latest symlink target: $latest_target"
@@ -194,9 +209,15 @@ fi
 if [ -n "$newest_run" ]; then
   echo "Newest run file: $newest_run"
 fi
-selected_run="$latest_target"
-if [ -z "$selected_run" ] || [ ! -f "$selected_run" ]; then
+if [ -n "$last_failed" ]; then
+  selected_run="$last_failed"
+  echo "Selected run: latest failing run"
+elif [ -n "$latest_target" ] && [ -f "$latest_target" ]; then
+  selected_run="$latest_target"
+  echo "Selected run: latest symlink target"
+else
   selected_run="$newest_run"
+  echo "Selected run: newest run file"
 fi
 if [ -n "$selected_run" ] && [ -f "$selected_run" ]; then
   echo "--- tail selected run ---"
@@ -205,24 +226,10 @@ else
   echo "No run logs found under $RUNS_DIR"
 fi
 
-last_failed=""
-if [ -d "$RUNS_DIR" ]; then
-  for f in $(ls -1t "$RUNS_DIR"/*.log 2>/dev/null); do
-    if grep -qE '(child_exit rc=[1-9][0-9]*|interactive_exit rc=[1-9][0-9]*|interactive_failed rc=[1-9][0-9]*)' "$f"; then
-      last_failed="$f"
-      break
-    fi
-  done
-fi
-if [ -n "$last_failed" ] && [ "$last_failed" != "$selected_run" ]; then
-  echo "--- tail latest failing run ---"
-  echo "Failing run: $last_failed"
-  tail -n 120 "$last_failed" 2>/dev/null || echo "(unable to read failing run)"
-fi
-
 echo "--- recent node diagnostic reports ---"
 ls -lt "$REPORT_DIR" 2>/dev/null | sed -n '1,20p' || echo "(no report directory)"
 EOS
 chmod +x "$DIAG_TOOL"
 
-echo "installed diagnostics wrapper under $BINDIR"
+echo "installed diagnostics wrapper under $BINDIR (core mode)"
+echo "optional extras: set GEMINI_DIAG_ENABLE_RSS=1 to enable RSS sampling for non-interactive runs"
