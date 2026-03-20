@@ -83,6 +83,11 @@ Patch groups and rollback guidance:
 
 This improves reliability, but it does not increase preview quota.
 
+## Architecture Map
+
+- quick internal map for upstream `gemini-cli` flow and Alpine patch/debug entry points:
+  - see [`architecture.md`](architecture.md)
+
 ## License
 
 - Repository license:
