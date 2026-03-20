@@ -66,6 +66,12 @@ Create a reproducible diagnostics bundle (latest failing run + artifacts):
 gemini-diag-bundle
 ```
 
+Run a deterministic reliability smoke pass (headless + PTY failure checks):
+
+```sh
+./scripts/gemini-reliability-smoke.sh
+```
+
 Force old parent/child relaunch behavior for debugging:
 
 ```sh

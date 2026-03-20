@@ -30,7 +30,6 @@ RUN_ARTIFACTS_DIR=""
 SAMPLE_SEC="${GEMINI_DIAG_SAMPLE_SEC:-2}"
 MAX_RSS_MB="${GEMINI_MAX_RSS_MB:-0}"
 ENABLE_RSS="${GEMINI_DIAG_ENABLE_RSS:-0}"
-SESSION_START_EPOCH="$(date +%s)"
 
 if [ ! -f "$TARGET" ]; then
   echo "gemini wrapper: target missing: $TARGET" >&2
@@ -98,17 +97,27 @@ capture_client_error_jsons() {
   RUN_ARTIFACTS_DIR="$RUNS_DIR/$RUN_ID.artifacts"
   mkdir -p "$RUN_ARTIFACTS_DIR" 2>/dev/null || true
   copied=0
-  for f in $(ls -1t /tmp/gemini-client-error-*.json 2>/dev/null | head -n 10); do
-    mtime_epoch=$(stat -c %Y "$f" 2>/dev/null || echo 0)
-    if [ "$mtime_epoch" -ge "$SESSION_START_EPOCH" ] 2>/dev/null; then
-      out="$RUN_ARTIFACTS_DIR/$(basename "$f")"
-      cp -f "$f" "$out" 2>/dev/null || true
-      log_event "artifact_copy type=client_error_json src=$f dst=$out"
-      copied=1
-    fi
-  done
+  refs="$(grep -o '/tmp/gemini-client-error-[^ ]*\.json' "$RUN_LOG" 2>/dev/null | sort -u || true)"
+  if [ -n "$refs" ]; then
+    for f in $refs; do
+      if [ -f "$f" ]; then
+        out="$RUN_ARTIFACTS_DIR/$(basename "$f")"
+        cp -f "$f" "$out" 2>/dev/null || true
+        log_event "artifact_copy type=client_error_json src=$f dst=$out"
+        copied=1
+      else
+        log_event "artifact_copy type=client_error_json src=$f missing=1"
+      fi
+    done
+  else
+    log_event "artifact_copy type=client_error_json none_referenced_in_run_log=1"
+  fi
   if [ "$copied" -eq 0 ]; then
-    log_event "artifact_copy type=client_error_json none_found=1 since_epoch=$SESSION_START_EPOCH"
+    if [ -n "$refs" ]; then
+      log_event "artifact_copy type=client_error_json referenced_but_unavailable=1"
+    else
+      log_event "artifact_copy type=client_error_json none_found=1"
+    fi
   fi
 }
 
