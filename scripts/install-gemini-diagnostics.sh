@@ -25,6 +25,8 @@ RUNS_DIR="$DIAG_ROOT/runs"
 REPORT_DIR="$DIAG_ROOT/reports"
 LAUNCH_LOG="$DIAG_ROOT/launcher.log"
 LATEST_LINK="$DIAG_ROOT/latest.log"
+SAMPLE_SEC="${GEMINI_DIAG_SAMPLE_SEC:-2}"
+MAX_RSS_MB="${GEMINI_MAX_RSS_MB:-0}"
 
 if [ ! -f "$TARGET" ]; then
   echo "gemini wrapper: target missing: $TARGET" >&2
@@ -56,8 +58,8 @@ export GEMINI_DIAG_REPORT_DIR="$REPORT_DIR"
 
 log_event "session_start pid=$$ ppid=$PPID cwd=$(pwd) tty_in=$([ -t 0 ] && echo 1 || echo 0) tty_out=$([ -t 1 ] && echo 1 || echo 0) args=$*"
 
-run_cmd() {
-  log_event "run_start node=$NODE_BIN target=$TARGET args=$*"
+run_cmd_foreground() {
+  log_event "run_start mode=foreground node=$NODE_BIN target=$TARGET args=$*"
   "$NODE_BIN" \
     --no-warnings=DEP0040 \
     --trace-uncaught \
@@ -67,11 +69,52 @@ run_cmd() {
     --report-on-fatalerror \
     --report-directory "$REPORT_DIR" \
     "$TARGET" "$@"
+  rc=$?
+  log_event "child_exit rc=$rc max_rss_kb=na max_rss_mb=na mode=foreground"
+  return "$rc"
+}
+
+run_cmd_sampled() {
+  log_event "run_start mode=sampled node=$NODE_BIN target=$TARGET args=$*"
+  "$NODE_BIN" \
+    --no-warnings=DEP0040 \
+    --trace-uncaught \
+    --trace-warnings \
+    --unhandled-rejections=strict \
+    --report-uncaught-exception \
+    --report-on-fatalerror \
+    --report-directory "$REPORT_DIR" \
+    "$TARGET" "$@" &
+  child_pid=$!
+  max_rss_kb=0
+  cap_kb=0
+  if [ "$MAX_RSS_MB" -gt 0 ] 2>/dev/null; then
+    cap_kb=$((MAX_RSS_MB * 1024))
+  fi
+  log_event "child_spawn pid=$child_pid sample_sec=$SAMPLE_SEC max_rss_mb=$MAX_RSS_MB"
+  while kill -0 "$child_pid" 2>/dev/null; do
+    rss_kb=$(awk '/^VmRSS:/ {print $2}' "/proc/$child_pid/status" 2>/dev/null || true)
+    if [ -n "$rss_kb" ] && [ "$rss_kb" -gt "$max_rss_kb" ] 2>/dev/null; then
+      max_rss_kb=$rss_kb
+      log_event "rss_peak pid=$child_pid rss_kb=$rss_kb rss_mb=$((rss_kb / 1024))"
+      if [ "$cap_kb" -gt 0 ] && [ "$rss_kb" -gt "$cap_kb" ] 2>/dev/null; then
+        log_event "rss_cap_exceeded pid=$child_pid rss_kb=$rss_kb cap_kb=$cap_kb sending=TERM"
+        kill -TERM "$child_pid" 2>/dev/null || true
+        sleep 1
+        kill -KILL "$child_pid" 2>/dev/null || true
+      fi
+    fi
+    sleep "$SAMPLE_SEC"
+  done
+  wait "$child_pid"
+  rc=$?
+  log_event "child_exit pid=$child_pid rc=$rc max_rss_kb=$max_rss_kb max_rss_mb=$((max_rss_kb / 1024))"
+  return "$rc"
 }
 
 if [ -t 0 ] && [ -t 1 ] && [ "$is_interactive" -eq 1 ]; then
   start_ts=$(date +%s)
-  run_cmd "$@"
+  run_cmd_foreground "$@"
   rc=$?
   end_ts=$(date +%s)
   dur=$((end_ts - start_ts))
@@ -81,7 +124,7 @@ if [ -t 0 ] && [ -t 1 ] && [ "$is_interactive" -eq 1 ]; then
     echo "gemini exited unexpectedly (code $rc). retrying once..." >&2
     log_event "interactive_retry_first rc=$rc"
     retry_start_ts=$(date +%s)
-    run_cmd "$@"
+    run_cmd_foreground "$@"
     rc=$?
     retry_end_ts=$(date +%s)
     retry_dur=$((retry_end_ts - retry_start_ts))
@@ -101,7 +144,7 @@ if [ -t 0 ] && [ -t 1 ] && [ "$is_interactive" -eq 1 ]; then
 fi
 
 start_ts=$(date +%s)
-run_cmd "$@"
+run_cmd_sampled "$@"
 rc=$?
 end_ts=$(date +%s)
 dur=$((end_ts - start_ts))
