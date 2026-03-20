@@ -60,6 +60,12 @@ Read latest diagnostics quickly:
 gemini-diag-last
 ```
 
+Create a reproducible diagnostics bundle (latest failing run + artifacts):
+
+```sh
+gemini-diag-bundle
+```
+
 Force old parent/child relaunch behavior for debugging:
 
 ```sh
