@@ -27,6 +27,7 @@ LAUNCH_LOG="$DIAG_ROOT/launcher.log"
 LATEST_LINK="$DIAG_ROOT/latest.log"
 SAMPLE_SEC="${GEMINI_DIAG_SAMPLE_SEC:-2}"
 MAX_RSS_MB="${GEMINI_MAX_RSS_MB:-0}"
+AUTO_RETRY_ON_CRASH="${GEMINI_AUTO_RETRY_ON_CRASH:-0}"
 
 if [ ! -f "$TARGET" ]; then
   echo "gemini wrapper: target missing: $TARGET" >&2
@@ -58,9 +59,45 @@ export GEMINI_DIAG_REPORT_DIR="$REPORT_DIR"
 
 log_event "session_start pid=$$ ppid=$PPID cwd=$(pwd) tty_in=$([ -t 0 ] && echo 1 || echo 0) tty_out=$([ -t 1 ] && echo 1 || echo 0) args=$*"
 
+with_stderr_tee_foreground() {
+  err_pipe=$(mktemp "$RUNS_DIR/.stderr.${RUN_ID}.XXXXXX")
+  rm -f "$err_pipe"
+  mkfifo "$err_pipe"
+  tee -a "$RUN_LOG" < "$err_pipe" >&2 &
+  err_tee_pid=$!
+  "$@" 2>"$err_pipe"
+  rc=$?
+  wait "$err_tee_pid" 2>/dev/null || true
+  rm -f "$err_pipe"
+  return "$rc"
+}
+
+start_stderr_tee_pipe() {
+  err_pipe=$(mktemp "$RUNS_DIR/.stderr.${RUN_ID}.XXXXXX")
+  rm -f "$err_pipe"
+  mkfifo "$err_pipe"
+  tee -a "$RUN_LOG" < "$err_pipe" >&2 &
+  err_tee_pid=$!
+}
+
+stop_stderr_tee_pipe() {
+  wait "$err_tee_pid" 2>/dev/null || true
+  rm -f "$err_pipe"
+}
+
+print_crash_notice() {
+  crash_code="$1"
+  printf '\n========== GEMINI CRASH NOTICE ==========\n' >&2
+  printf 'time: %s\n' "$(date -Iseconds)" >&2
+  printf 'exit code: %s\n' "$crash_code" >&2
+  printf 'diagnostics: %s\n' "$RUN_LOG" >&2
+  printf '=========================================\n\n' >&2
+}
+
 run_cmd_foreground() {
   log_event "run_start mode=foreground node=$NODE_BIN target=$TARGET args=$*"
-  "$NODE_BIN" \
+  with_stderr_tee_foreground \
+    "$NODE_BIN" \
     --no-warnings=DEP0040 \
     --trace-uncaught \
     --trace-warnings \
@@ -76,6 +113,7 @@ run_cmd_foreground() {
 
 run_cmd_sampled() {
   log_event "run_start mode=sampled node=$NODE_BIN target=$TARGET args=$*"
+  start_stderr_tee_pipe
   "$NODE_BIN" \
     --no-warnings=DEP0040 \
     --trace-uncaught \
@@ -84,7 +122,7 @@ run_cmd_sampled() {
     --report-uncaught-exception \
     --report-on-fatalerror \
     --report-directory "$REPORT_DIR" \
-    "$TARGET" "$@" &
+    "$TARGET" "$@" 2>"$err_pipe" &
   child_pid=$!
   max_rss_kb=0
   cap_kb=0
@@ -108,6 +146,7 @@ run_cmd_sampled() {
   done
   wait "$child_pid"
   rc=$?
+  stop_stderr_tee_pipe
   log_event "child_exit pid=$child_pid rc=$rc max_rss_kb=$max_rss_kb max_rss_mb=$((max_rss_kb / 1024))"
   return "$rc"
 }
@@ -121,20 +160,27 @@ if [ -t 0 ] && [ -t 1 ] && [ "$is_interactive" -eq 1 ]; then
   log_event "interactive_exit rc=$rc dur=${dur}s args=$*"
 
   if [ "$rc" -ne 0 ] && [ "$rc" -ne 130 ]; then
-    echo "gemini exited unexpectedly (code $rc). retrying once..." >&2
-    log_event "interactive_retry_first rc=$rc"
-    retry_start_ts=$(date +%s)
-    run_cmd_foreground "$@"
-    rc=$?
-    retry_end_ts=$(date +%s)
-    retry_dur=$((retry_end_ts - retry_start_ts))
-    log_event "interactive_retry_exit rc=$rc dur=${retry_dur}s args=$*"
-    if [ "$rc" -ne 0 ] && [ "$rc" -ne 130 ]; then
-      echo "gemini failed again (code $rc). diagnostics: $RUN_LOG" >&2
-      log_event "interactive_retry_failed rc=$rc"
+    print_crash_notice "$rc"
+    if [ "$AUTO_RETRY_ON_CRASH" = "1" ]; then
+      echo "auto-restart: enabled (GEMINI_AUTO_RETRY_ON_CRASH=1). retrying once..." >&2
+      log_event "interactive_retry_first rc=$rc"
+      retry_start_ts=$(date +%s)
+      run_cmd_foreground "$@"
+      rc=$?
+      retry_end_ts=$(date +%s)
+      retry_dur=$((retry_end_ts - retry_start_ts))
+      log_event "interactive_retry_exit rc=$rc dur=${retry_dur}s args=$*"
+      if [ "$rc" -ne 0 ] && [ "$rc" -ne 130 ]; then
+        print_crash_notice "$rc"
+        echo "gemini failed again. no more retries." >&2
+        log_event "interactive_retry_failed rc=$rc"
+      else
+        echo "gemini recovered after retry. diagnostics: $RUN_LOG" >&2
+        log_event "interactive_retry_recovered rc=$rc"
+      fi
     else
-      echo "gemini recovered after retry. diagnostics: $RUN_LOG" >&2
-      log_event "interactive_retry_recovered rc=$rc"
+      echo "auto-restart: disabled (diagnostic mode). relaunch manually when ready." >&2
+      log_event "interactive_retry_skipped rc=$rc"
     fi
   elif [ "$rc" -eq 0 ] && [ "$dur" -lt 5 ]; then
     echo "gemini ended quickly (code 0, ${dur}s). diagnostics: $RUN_LOG" >&2
