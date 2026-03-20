@@ -30,6 +30,7 @@ RUN_ARTIFACTS_DIR=""
 SAMPLE_SEC="${GEMINI_DIAG_SAMPLE_SEC:-2}"
 MAX_RSS_MB="${GEMINI_MAX_RSS_MB:-0}"
 ENABLE_RSS="${GEMINI_DIAG_ENABLE_RSS:-0}"
+DEBUG_DISABLE_RETRY="${GEMINI_DEBUG_DISABLE_RETRY:-0}"
 
 if [ ! -f "$TARGET" ]; then
   echo "gemini wrapper: target missing: $TARGET" >&2
@@ -59,8 +60,16 @@ done
 
 export GEMINI_DIAG_FILE="$RUN_LOG"
 export GEMINI_DIAG_REPORT_DIR="$REPORT_DIR"
+if [ "$DEBUG_DISABLE_RETRY" = "1" ]; then
+  export GEMINI_CLI_NO_RELAUNCH="true"
+  export GEMINI_DISABLE_INTERACTIVE_AUTO_RETRY="1"
+  export GEMINI_DISABLE_INTERACTIVE_AUTO_RECOVER="1"
+fi
 
 log_event "session_start pid=$$ ppid=$PPID cwd=$(pwd) tty_in=$([ -t 0 ] && echo 1 || echo 0) tty_out=$([ -t 1 ] && echo 1 || echo 0) args=$*"
+if [ "$DEBUG_DISABLE_RETRY" = "1" ]; then
+  log_event "debug_disable_retry=1 env_no_relaunch=1"
+fi
 
 with_stderr_tee_foreground() {
   err_pipe=$(mktemp "$RUNS_DIR/.stderr.${RUN_ID}.XXXXXX")
@@ -362,10 +371,37 @@ if [ -s "$tmp_ref_list" ]; then
 fi
 
 meta="$bundle_dir/metadata.txt"
+model=""
+model="$(sed -n 's/.* args=.*-m \([^ ]*\).*/\1/p' "$selected_run" | head -n 1 || true)"
+if [ -z "$model" ]; then
+  model="(default)"
+fi
+error_class="$(grep -oE '[A-Za-z][A-Za-z0-9]+Error' "$selected_run" 2>/dev/null | head -n 1 || true)"
+if [ -z "$error_class" ]; then
+  error_class="(none)"
+fi
+quota_context=0
+if grep -qiE 'quota exceeded|capacity-related|resource exhausted|rate limit|too many requests|[^0-9]429[^0-9]' "$selected_run" 2>/dev/null; then
+  quota_context=1
+fi
+last_exit_line="$(grep -E '(interactive_exit|noninteractive_exit) rc=' "$selected_run" 2>/dev/null | tail -n 1 || true)"
+last_rc="$(printf '%s\n' "$last_exit_line" | sed -n 's/.* rc=\([0-9][0-9]*\).*/\1/p' | head -n 1 || true)"
+if [ -z "$last_rc" ]; then
+  last_rc="unknown"
+fi
+last_dur="$(printf '%s\n' "$last_exit_line" | sed -n 's/.* dur=\([0-9][0-9]*s\).*/\1/p' | head -n 1 || true)"
+if [ -z "$last_dur" ]; then
+  last_dur="unknown"
+fi
 {
   echo "created_at=$(date -Iseconds)"
   echo "selected_run=$selected_run"
   echo "run_base=$run_base"
+  echo "model=$model"
+  echo "error_class=$error_class"
+  echo "quota_context=$quota_context"
+  echo "last_exit_rc=$last_rc"
+  echo "last_exit_dur=$last_dur"
   echo "hostname=$(hostname 2>/dev/null || echo unknown)"
   echo "uname=$(uname -a 2>/dev/null || echo unknown)"
   if command -v gemini >/dev/null 2>&1; then

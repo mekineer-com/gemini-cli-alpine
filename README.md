@@ -72,6 +72,18 @@ Run a deterministic reliability smoke pass (headless + PTY failure checks):
 ./scripts/gemini-reliability-smoke.sh
 ```
 
+Smoke history is appended to:
+
+```sh
+~/.gemini/diagnostics/smoke/history.tsv
+```
+
+Debug mode to suppress relaunch/retry-style behavior during repro sessions:
+
+```sh
+GEMINI_DEBUG_DISABLE_RETRY=1 gemini
+```
+
 Force old parent/child relaunch behavior for debugging:
 
 ```sh
