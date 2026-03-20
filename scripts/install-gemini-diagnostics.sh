@@ -36,7 +36,8 @@ fi
 mkdir -p "$RUNS_DIR" "$REPORT_DIR" 2>/dev/null || true
 RUN_ID="$(date '+%Y%m%dT%H%M%S')-$$"
 RUN_LOG="$RUNS_DIR/$RUN_ID.log"
-ln -sfn "$RUN_LOG" "$LATEST_LINK" 2>/dev/null || true
+rm -f "$LATEST_LINK" 2>/dev/null || true
+ln -s "$RUN_LOG" "$LATEST_LINK" 2>/dev/null || true
 
 log_event() {
   line="$(date -Iseconds)\t$*"
@@ -175,16 +176,48 @@ cat > "$DIAG_TOOL" <<'EOS'
 #!/bin/sh
 DIAG_ROOT="${GEMINI_DIAG_ROOT:-$HOME/.gemini/diagnostics}"
 LATEST_LINK="$DIAG_ROOT/latest.log"
+RUNS_DIR="$DIAG_ROOT/runs"
 REPORT_DIR="$DIAG_ROOT/reports"
 
 echo "Diagnostics root: $DIAG_ROOT"
+latest_target=""
+newest_run=""
 if [ -L "$LATEST_LINK" ] || [ -f "$LATEST_LINK" ]; then
   latest_target=$(readlink "$LATEST_LINK" 2>/dev/null || true)
-  [ -n "$latest_target" ] && echo "Latest run log: $latest_target"
-  echo "--- tail latest log ---"
-  tail -n 120 "$LATEST_LINK" 2>/dev/null || echo "(unable to read latest log)"
+fi
+if [ -d "$RUNS_DIR" ]; then
+  newest_run=$(ls -1t "$RUNS_DIR"/*.log 2>/dev/null | head -n 1 || true)
+fi
+if [ -n "$latest_target" ]; then
+  echo "Latest symlink target: $latest_target"
+fi
+if [ -n "$newest_run" ]; then
+  echo "Newest run file: $newest_run"
+fi
+selected_run="$latest_target"
+if [ -z "$selected_run" ] || [ ! -f "$selected_run" ]; then
+  selected_run="$newest_run"
+fi
+if [ -n "$selected_run" ] && [ -f "$selected_run" ]; then
+  echo "--- tail selected run ---"
+  tail -n 120 "$selected_run" 2>/dev/null || echo "(unable to read selected run)"
 else
-  echo "No latest log found at $LATEST_LINK"
+  echo "No run logs found under $RUNS_DIR"
+fi
+
+last_failed=""
+if [ -d "$RUNS_DIR" ]; then
+  for f in $(ls -1t "$RUNS_DIR"/*.log 2>/dev/null); do
+    if grep -qE '(child_exit rc=[1-9][0-9]*|interactive_exit rc=[1-9][0-9]*|interactive_failed rc=[1-9][0-9]*)' "$f"; then
+      last_failed="$f"
+      break
+    fi
+  done
+fi
+if [ -n "$last_failed" ] && [ "$last_failed" != "$selected_run" ]; then
+  echo "--- tail latest failing run ---"
+  echo "Failing run: $last_failed"
+  tail -n 120 "$last_failed" 2>/dev/null || echo "(unable to read failing run)"
 fi
 
 echo "--- recent node diagnostic reports ---"
