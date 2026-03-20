@@ -115,27 +115,15 @@ if "argv.length === 1 && (argv[0] === '--version' || argv[0] === '-v')" not in t
         # instead of aborting the whole reapply operation.
         pass
 
-text = replace_once_or_skip(
-    text,
-    "const [{ main }, { FatalError, writeToStderr }, { runExitCleanup }] =\n    await Promise.all([\n        import('./src/gemini.js'),\n        import('@google/gemini-cli-core'),\n        import('./src/utils/cleanup.js'),\n    ]);\n// --- Global Entry Point ---\n",
-    "const [{ main }, { FatalError, writeToStderr }, { runExitCleanup }] =\n    await Promise.all([\n        import('./src/gemini.js'),\n        import('@google/gemini-cli-core'),\n        import('./src/utils/cleanup.js'),\n    ]);\nconst cliArgs = process.argv.slice(2);\nconst isLikelyInteractiveSession = process.stdin.isTTY &&\n    process.stdout.isTTY &&\n    !cliArgs.includes('-p') &&\n    !cliArgs.includes('--prompt');\nlet didAutoRecoverInteractive = false;\n// --- Global Entry Point ---\n",
+text = text.replace(
+    "const cliArgs = process.argv.slice(2);\nconst isLikelyInteractiveSession = process.stdin.isTTY &&\n    process.stdout.isTTY &&\n    !cliArgs.includes('-p') &&\n    !cliArgs.includes('--prompt');\nlet didAutoRecoverInteractive = false;\n",
+    "",
 )
-if "didAutoRecoverInteractive" not in text:
-    marker = "// --- Global Entry Point ---\n"
-    block = (
-        "const cliArgs = process.argv.slice(2);\n"
-        "const isLikelyInteractiveSession = process.stdin.isTTY &&\n"
-        "    process.stdout.isTTY &&\n"
-        "    !cliArgs.includes('-p') &&\n"
-        "    !cliArgs.includes('--prompt');\n"
-        "let didAutoRecoverInteractive = false;\n"
-        "// --- Global Entry Point ---\n"
-    )
-    text = text.replace(marker, block, 1)
-text = replace_once_or_skip(
+text = re.sub(
+    r"    if \(isLikelyInteractiveSession &&[\s\S]*?    \}\n    if \(error instanceof FatalError\) \{",
+    "    if (error instanceof FatalError) {",
     text,
-    "    if (error instanceof FatalError) {\n",
-    "    if (isLikelyInteractiveSession &&\n        !didAutoRecoverInteractive &&\n        !(error instanceof FatalError)) {\n        didAutoRecoverInteractive = true;\n        writeToStderr('Gemini hit an unexpected error. Retrying interactive session once...\\n');\n        try {\n            await main();\n            return;\n        }\n        catch (retryError) {\n            error = retryError;\n            writeToStderr('Automatic retry failed. Exiting.\\n');\n        }\n    }\n    if (error instanceof FatalError) {\n",
+    count=1,
 )
 index.write_text(text)
 
@@ -375,10 +363,11 @@ text = replace_once_or_skip(
 )
 text = text.replace("        const sandboxConfig = await loadSandboxConfig(settings.merged, argv);\n", "", 1)
 
-text = replace_once_or_skip(
-    text,
+text = re.sub(
+    r"        if \(config\.isInteractive\(\)\) \{\n            const renderInteractiveUi = async \(\) => startInteractiveUI\(config, settings, startupWarnings, process\.cwd\(\), resumedSessionData, initializationResult\);\n            try \{\n                await renderInteractiveUi\(\);\n                return;\n            \}\n            catch \(error\) \{\n                const message = error instanceof Error \? error\.message : String\(error \?\? 'Unknown'\);\n                coreEvents\.emitFeedback\('error', `Interactive session failed: \$\{message\}`\);\n                writeToStderr\(`Interactive session failed: \$\{message\}\\n`\);\n                writeToStderr\('Retrying interactive session once\.\.\.\\n'\);\n                debugLogger\.error\('Interactive session failed \(first attempt\)', error\);\n            \}\n            try \{\n                await renderInteractiveUi\(\);\n                return;\n            \}\n            catch \(error\) \{\n                const message = error instanceof Error \? error\.message : String\(error \?\? 'Unknown'\);\n                coreEvents\.emitFeedback\('error', `Interactive session failed again: \$\{message\}`\);\n                writeToStderr\(`Interactive session failed again: \$\{message\}\\n`\);\n                writeToStderr\('Gemini CLI is exiting after repeated interactive startup failure\.\\n'\);\n                debugLogger\.error\('Interactive session failed \(second attempt\)', error\);\n                await runExitCleanup\(\);\n                process\.exit\(1\);\n            \}\n        \}\n",
     "        if (config.isInteractive()) {\n            await startInteractiveUI(config, settings, startupWarnings, process.cwd(), resumedSessionData, initializationResult);\n            return;\n        }\n",
-    "        if (config.isInteractive()) {\n            const renderInteractiveUi = async () => startInteractiveUI(config, settings, startupWarnings, process.cwd(), resumedSessionData, initializationResult);\n            try {\n                await renderInteractiveUi();\n                return;\n            }\n            catch (error) {\n                const message = error instanceof Error ? error.message : String(error ?? 'Unknown');\n                coreEvents.emitFeedback('error', `Interactive session failed: ${message}`);\n                writeToStderr(`Interactive session failed: ${message}\\n`);\n                writeToStderr('Retrying interactive session once...\\n');\n                debugLogger.error('Interactive session failed (first attempt)', error);\n            }\n            try {\n                await renderInteractiveUi();\n                return;\n            }\n            catch (error) {\n                const message = error instanceof Error ? error.message : String(error ?? 'Unknown');\n                coreEvents.emitFeedback('error', `Interactive session failed again: ${message}`);\n                writeToStderr(`Interactive session failed again: ${message}\\n`);\n                writeToStderr('Gemini CLI is exiting after repeated interactive startup failure.\\n');\n                debugLogger.error('Interactive session failed (second attempt)', error);\n                await runExitCleanup();\n                process.exit(1);\n            }\n        }\n",
+    text,
+    count=1,
 )
 cli_gemini.write_text(text)
 

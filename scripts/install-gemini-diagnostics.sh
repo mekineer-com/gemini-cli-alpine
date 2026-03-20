@@ -27,7 +27,6 @@ LAUNCH_LOG="$DIAG_ROOT/launcher.log"
 LATEST_LINK="$DIAG_ROOT/latest.log"
 SAMPLE_SEC="${GEMINI_DIAG_SAMPLE_SEC:-2}"
 MAX_RSS_MB="${GEMINI_MAX_RSS_MB:-0}"
-AUTO_RETRY_ON_CRASH="${GEMINI_AUTO_RETRY_ON_CRASH:-0}"
 
 if [ ! -f "$TARGET" ]; then
   echo "gemini wrapper: target missing: $TARGET" >&2
@@ -87,11 +86,7 @@ stop_stderr_tee_pipe() {
 
 print_crash_notice() {
   crash_code="$1"
-  printf '\n========== GEMINI CRASH NOTICE ==========\n' >&2
-  printf 'time: %s\n' "$(date -Iseconds)" >&2
-  printf 'exit code: %s\n' "$crash_code" >&2
-  printf 'diagnostics: %s\n' "$RUN_LOG" >&2
-  printf '=========================================\n\n' >&2
+  printf 'gemini exited unexpectedly (code %s). diagnostics: %s\n' "$crash_code" "$RUN_LOG" >&2
 }
 
 run_cmd_foreground() {
@@ -161,30 +156,7 @@ if [ -t 0 ] && [ -t 1 ] && [ "$is_interactive" -eq 1 ]; then
 
   if [ "$rc" -ne 0 ] && [ "$rc" -ne 130 ]; then
     print_crash_notice "$rc"
-    if [ "$AUTO_RETRY_ON_CRASH" = "1" ]; then
-      echo "auto-restart: enabled (GEMINI_AUTO_RETRY_ON_CRASH=1). retrying once..." >&2
-      log_event "interactive_retry_first rc=$rc"
-      retry_start_ts=$(date +%s)
-      run_cmd_foreground "$@"
-      rc=$?
-      retry_end_ts=$(date +%s)
-      retry_dur=$((retry_end_ts - retry_start_ts))
-      log_event "interactive_retry_exit rc=$rc dur=${retry_dur}s args=$*"
-      if [ "$rc" -ne 0 ] && [ "$rc" -ne 130 ]; then
-        print_crash_notice "$rc"
-        echo "gemini failed again. no more retries." >&2
-        log_event "interactive_retry_failed rc=$rc"
-      else
-        echo "gemini recovered after retry. diagnostics: $RUN_LOG" >&2
-        log_event "interactive_retry_recovered rc=$rc"
-      fi
-    else
-      echo "auto-restart: disabled (diagnostic mode). relaunch manually when ready." >&2
-      log_event "interactive_retry_skipped rc=$rc"
-    fi
-  elif [ "$rc" -eq 0 ] && [ "$dur" -lt 5 ]; then
-    echo "gemini ended quickly (code 0, ${dur}s). diagnostics: $RUN_LOG" >&2
-    log_event "interactive_quick_exit rc=0 dur=${dur}s"
+    log_event "interactive_failed rc=$rc"
   fi
   exit "$rc"
 fi
