@@ -92,6 +92,17 @@ def replace_once_or_skip(text, old, new):
         return text.replace(old, new, 1)
     return text
 
+def replace_once_or_fail(text, old, new, label):
+    if new in text:
+        return text
+    if old in text:
+        return text.replace(old, new, 1)
+    raise RuntimeError(f"critical patch missing marker: {label}")
+
+def require_contains(text, needle, label):
+    if needle not in text:
+        raise RuntimeError(f"critical patch verification failed: {label}")
+
 text = index.read_text()
 if text.startswith('#!/usr/bin/env -S node --no-warnings=DEP0040'):
     text = text.replace('#!/usr/bin/env -S node --no-warnings=DEP0040', '#!/usr/bin/node --no-warnings=DEP0040', 1)
@@ -100,7 +111,8 @@ elif text.startswith('#!/usr/bin/env node'):
 if "GEMINI_CLI_FORCE_RELAUNCH" not in text:
     marker = "import { createRequire } from 'node:module';\n"
     block = marker + "import { existsSync } from 'node:fs';\nif (process.platform === 'linux' &&\n    existsSync('/etc/alpine-release') &&\n    !process.env['GEMINI_CLI_NO_RELAUNCH'] &&\n    !process.env['GEMINI_CLI_FORCE_RELAUNCH']) {\n    process.env['GEMINI_CLI_NO_RELAUNCH'] = 'true';\n}\n"
-    text = text.replace(marker, block, 1)
+    if marker in text:
+        text = text.replace(marker, block, 1)
 if "argv.length === 1 && (argv[0] === '--version' || argv[0] === '-v')" not in text:
     create_require = "import { createRequire } from 'node:module';\n"
     process_marker = "import process from 'node:process';\n"
@@ -125,21 +137,34 @@ text = re.sub(
     text,
     count=1,
 )
+require_contains(text, '#!/usr/bin/node --no-warnings=DEP0040', 'index_shebang')
 index.write_text(text)
 
 text = shell.read_text()
-text = text.replace('pgrep -g 0', 'pgrep -P $$')
-text = text.replace('this.config.getEnableInteractiveShell()', 'this.config.isInteractiveShellEnabled()')
+text = replace_once_or_fail(text, 'pgrep -g 0', 'pgrep -P $$', 'shell_pgrep_fix')
+text = replace_once_or_fail(
+    text,
+    'this.config.getEnableInteractiveShell()',
+    'this.config.isInteractiveShellEnabled()',
+    'shell_interactive_getter_fix',
+)
 shell.write_text(text)
 
 text = getpty.read_text()
 old = "    const candidates = [\n        ['@lydell/node-pty', 'lydell-node-pty'],\n        ['node-pty', 'node-pty'],\n    ];"
 new = "    const preferNodePty = process.platform === 'linux' && (await import('node:fs')).existsSync('/etc/alpine-release');\n    const candidates = preferNodePty\n        ? [\n            ['node-pty', 'node-pty'],\n            ['@lydell/node-pty', 'lydell-node-pty'],\n        ]\n        : [\n            ['@lydell/node-pty', 'lydell-node-pty'],\n            ['node-pty', 'node-pty'],\n        ];"
 alt_new = "    const preferNodePty = process.platform === 'linux' && existsSync('/etc/alpine-release');\n    const candidates = preferNodePty\n        ? [\n            ['node-pty', 'node-pty'],\n            ['@lydell/node-pty', 'lydell-node-pty'],\n        ]\n        : [\n            ['@lydell/node-pty', 'lydell-node-pty'],\n            ['node-pty', 'node-pty'],\n        ];"
+old_legacy = "    try {\n        const lydell = '@lydell/node-pty';\n        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment\n        const module = await import(lydell);\n        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment\n        return { module, name: 'lydell-node-pty' };\n    }\n    catch (_e) {\n        try {\n            const nodePty = 'node-pty';\n            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment\n            const module = await import(nodePty);\n            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment\n            return { module, name: 'node-pty' };\n        }\n        catch (_e2) {\n            return null;\n        }\n    }"
+new_legacy = "    const preferNodePty = process.platform === 'linux' && (await import('node:fs')).existsSync('/etc/alpine-release');\n    try {\n        const firstChoice = preferNodePty ? 'node-pty' : '@lydell/node-pty';\n        const firstName = preferNodePty ? 'node-pty' : 'lydell-node-pty';\n        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment\n        const module = await import(firstChoice);\n        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment\n        return { module, name: firstName };\n    }\n    catch (_e) {\n        try {\n            const secondChoice = preferNodePty ? '@lydell/node-pty' : 'node-pty';\n            const secondName = preferNodePty ? 'lydell-node-pty' : 'node-pty';\n            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment\n            const module = await import(secondChoice);\n            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment\n            return { module, name: secondName };\n        }\n        catch (_e2) {\n            return null;\n        }\n    }"
 if old in text:
     text = text.replace(old, new, 1)
 elif alt_new in text:
     pass
+elif old_legacy in text:
+    text = text.replace(old_legacy, new_legacy, 1)
+else:
+    raise RuntimeError("critical patch missing marker: getpty_candidate_order")
+require_contains(text, "existsSync('/etc/alpine-release')", 'getpty_alpine_preference')
 getpty.write_text(text)
 
 text = policycatalog.read_text()
@@ -375,6 +400,11 @@ text = cli_noninteractive.read_text()
 text = text.replace(
     "        catch (error) {\n            errorToHandle = error;\n        }\n        finally {\n            // Cleanup stdin cancellation before other cleanup\n            cleanupStdinCancellation();\n            consolePatcher.cleanup();\n            coreEvents.off(CoreEvent.UserFeedback, handleUserFeedback);\n        }\n        if (errorToHandle) {\n            handleError(errorToHandle, config);\n        }",
     "        catch (error) {\n            errorToHandle = error;\n            handleError(errorToHandle, config);\n        }\n        finally {\n            // Cleanup stdin cancellation before other cleanup\n            cleanupStdinCancellation();\n            consolePatcher.cleanup();\n            coreEvents.off(CoreEvent.UserFeedback, handleUserFeedback);\n        }",
+)
+require_contains(
+    text,
+    "catch (error) {\n            errorToHandle = error;\n            handleError(errorToHandle, config);\n        }",
+    'noninteractive_error_ordering',
 )
 cli_noninteractive.write_text(text)
 PY

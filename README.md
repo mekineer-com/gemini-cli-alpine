@@ -36,6 +36,12 @@ User-local install:
 ./scripts/install-user-local.sh
 ```
 
+Install a specific version (default is `0.34.0`):
+
+```sh
+GEMINI_CLI_VERSION=0.34.0 ./scripts/install-user-local.sh
+```
+
 Reapply patches after reinstall:
 
 ```sh

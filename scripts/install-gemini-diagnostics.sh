@@ -20,7 +20,7 @@ cat > "$WRAPPER" <<'EOS'
 #!/bin/sh
 SELF_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 TARGET="$SELF_DIR/../lib/node_modules/@google/gemini-cli/dist/index.js"
-NODE_BIN="/usr/bin/node"
+NODE_BIN="${GEMINI_NODE_BIN:-$(command -v node 2>/dev/null || true)}"
 DIAG_ROOT="${GEMINI_DIAG_ROOT:-$HOME/.gemini/diagnostics}"
 RUNS_DIR="$DIAG_ROOT/runs"
 REPORT_DIR="$DIAG_ROOT/reports"
@@ -34,6 +34,10 @@ DEBUG_DISABLE_RETRY="${GEMINI_DEBUG_DISABLE_RETRY:-0}"
 
 if [ ! -f "$TARGET" ]; then
   echo "gemini wrapper: target missing: $TARGET" >&2
+  exit 127
+fi
+if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
+  echo "gemini wrapper: node binary not found (set GEMINI_NODE_BIN=/path/to/node)" >&2
   exit 127
 fi
 
@@ -65,8 +69,15 @@ if [ "$DEBUG_DISABLE_RETRY" = "1" ]; then
   export GEMINI_DISABLE_INTERACTIVE_AUTO_RETRY="1"
   export GEMINI_DISABLE_INTERACTIVE_AUTO_RECOVER="1"
 fi
+# Alpine + node-pty can segfault in long sessions; default to child_process unless overridden.
+if [ -z "${GEMINI_PTY_INFO:-}" ] && [ -f /etc/alpine-release ] && [ "${GEMINI_FORCE_NODE_PTY:-0}" != "1" ]; then
+  export GEMINI_PTY_INFO="child_process"
+  pty_mode_note="child_process(alpine_default)"
+else
+  pty_mode_note="${GEMINI_PTY_INFO:-auto}"
+fi
 
-log_event "session_start pid=$$ ppid=$PPID cwd=$(pwd) tty_in=$([ -t 0 ] && echo 1 || echo 0) tty_out=$([ -t 1 ] && echo 1 || echo 0) args=$*"
+log_event "session_start pid=$$ ppid=$PPID cwd=$(pwd) tty_in=$([ -t 0 ] && echo 1 || echo 0) tty_out=$([ -t 1 ] && echo 1 || echo 0) pty_mode=$pty_mode_note args=$*"
 if [ "$DEBUG_DISABLE_RETRY" = "1" ]; then
   log_event "debug_disable_retry=1 env_no_relaunch=1"
 fi
@@ -155,6 +166,8 @@ run_cmd_foreground() {
     --unhandled-rejections=strict \
     --report-uncaught-exception \
     --report-on-fatalerror \
+    --report-on-signal \
+    --report-signal=SIGSEGV \
     --report-directory "$REPORT_DIR" \
     "$TARGET" "$@"
   rc=$?
@@ -172,6 +185,8 @@ run_cmd_sampled() {
     --unhandled-rejections=strict \
     --report-uncaught-exception \
     --report-on-fatalerror \
+    --report-on-signal \
+    --report-signal=SIGSEGV \
     --report-directory "$REPORT_DIR" \
     "$TARGET" "$@" 2>"$err_pipe" &
   child_pid=$!
@@ -254,7 +269,7 @@ last_failed=""
 if [ -d "$RUNS_DIR" ]; then
   newest_run=$(ls -1t "$RUNS_DIR"/*.log 2>/dev/null | head -n 1 || true)
   for f in $(ls -1t "$RUNS_DIR"/*.log 2>/dev/null); do
-    if grep -qE '(child_exit.*rc=[1-9][0-9]*|interactive_exit rc=[1-9][0-9]*|interactive_failed rc=[1-9][0-9]*|noninteractive_failed rc=[1-9][0-9]*)' "$f"; then
+    if grep -qE '(interactive_failed rc=[1-9][0-9]*|noninteractive_failed rc=[1-9][0-9]*|child_exit.*rc=[1-9][0-9]*|Segmentation fault|upstream_auto_retry_failed=1|upstream_auto_retry_detected|gemini exited unexpectedly)' "$f"; then
       last_failed="$f"
       break
     fi
@@ -280,6 +295,7 @@ else
   echo "Selected run: newest run file"
 fi
 if [ -n "$selected_run" ] && [ -f "$selected_run" ]; then
+  echo "Selected run file: $selected_run"
   echo "--- tail selected run ---"
   tail -n 120 "$selected_run" 2>/dev/null || echo "(unable to read selected run)"
   artifact_dir="$selected_run.artifacts"
@@ -314,7 +330,7 @@ last_failed=""
 if [ -d "$RUNS_DIR" ]; then
   newest_run=$(ls -1t "$RUNS_DIR"/*.log 2>/dev/null | head -n 1 || true)
   for f in $(ls -1t "$RUNS_DIR"/*.log 2>/dev/null); do
-    if grep -qE '(child_exit.*rc=[1-9][0-9]*|interactive_exit rc=[1-9][0-9]*|interactive_failed rc=[1-9][0-9]*|noninteractive_failed rc=[1-9][0-9]*)' "$f"; then
+    if grep -qE '(interactive_failed rc=[1-9][0-9]*|noninteractive_failed rc=[1-9][0-9]*|child_exit.*rc=[1-9][0-9]*|Segmentation fault|upstream_auto_retry_failed=1|upstream_auto_retry_detected|gemini exited unexpectedly)' "$f"; then
       last_failed="$f"
       break
     fi
