@@ -162,6 +162,8 @@ elif alt_new in text:
     pass
 elif old_legacy in text:
     text = text.replace(old_legacy, new_legacy, 1)
+elif new_legacy in text:
+    pass
 else:
     raise RuntimeError("critical patch missing marker: getpty_candidate_order")
 require_contains(text, "existsSync('/etc/alpine-release')", 'getpty_alpine_preference')
