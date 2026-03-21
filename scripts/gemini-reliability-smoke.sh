@@ -25,10 +25,7 @@ run_expect_failure() {
   label="$1"
   shift
   echo "[smoke] $label (expecting non-zero)"
-  set +e
-  "$@"
-  rc=$?
-  set -e
+  "$@" && rc=0 || rc=$?
   if [ "$rc" -eq 0 ]; then
     echo "[smoke] FAIL: expected non-zero exit for: $label" >&2
     exit 1
