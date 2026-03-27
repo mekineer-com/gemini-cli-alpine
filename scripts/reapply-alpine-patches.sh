@@ -36,6 +36,7 @@ CLI_DIST="$ROOT/dist/src"
 CLI_CONFIG_JS="$CLI_DIST/config/config.js"
 CLI_GEMINI_JS="$CLI_DIST/gemini.js"
 CLI_NONINTERACTIVE_JS="$CLI_DIST/nonInteractiveCli.js"
+USE_QUOTA_FALLBACK_JS="$CLI_DIST/ui/hooks/useQuotaAndFallback.js"
 SHELL_JS="$CORE/src/tools/shell.js"
 GETPTY_JS="$CORE/src/utils/getPty.js"
 POLICYCATALOG_JS="$CORE/src/availability/policyCatalog.js"
@@ -43,10 +44,12 @@ HANDLER_JS="$CORE/src/fallback/handler.js"
 GEMINICHAT_JS="$CORE/src/core/geminiChat.js"
 CLIENT_JS="$CORE/src/core/client.js"
 TOOLEXECUTOR_JS="$CORE/src/scheduler/tool-executor.js"
+CORE_CONFIG_JS="$CORE/src/config/config.js"
 AUTH_JS="$CLI_DIST/core/auth.js"
 INITIALIZER_JS="$CLI_DIST/core/initializer.js"
 USEAUTH_JS="$CLI_DIST/ui/auth/useAuth.js"
 APPCONTAINER_JS="$CLI_DIST/ui/AppContainer.js"
+GOOGLE_QUOTA_ERRORS_JS="$CORE/src/utils/googleQuotaErrors.js"
 
 [ -f "$INDEX" ] || { echo "missing $INDEX" >&2; exit 1; }
 [ -f "$SHELL_JS" ] || { echo "missing $SHELL_JS" >&2; exit 1; }
@@ -56,15 +59,18 @@ APPCONTAINER_JS="$CLI_DIST/ui/AppContainer.js"
 [ -f "$GEMINICHAT_JS" ] || { echo "missing $GEMINICHAT_JS" >&2; exit 1; }
 [ -f "$CLIENT_JS" ] || { echo "missing $CLIENT_JS" >&2; exit 1; }
 [ -f "$TOOLEXECUTOR_JS" ] || { echo "missing $TOOLEXECUTOR_JS" >&2; exit 1; }
+[ -f "$CORE_CONFIG_JS" ] || { echo "missing $CORE_CONFIG_JS" >&2; exit 1; }
 [ -f "$AUTH_JS" ] || { echo "missing $AUTH_JS" >&2; exit 1; }
 [ -f "$INITIALIZER_JS" ] || { echo "missing $INITIALIZER_JS" >&2; exit 1; }
 [ -f "$USEAUTH_JS" ] || { echo "missing $USEAUTH_JS" >&2; exit 1; }
 [ -f "$APPCONTAINER_JS" ] || { echo "missing $APPCONTAINER_JS" >&2; exit 1; }
+[ -f "$GOOGLE_QUOTA_ERRORS_JS" ] || { echo "missing $GOOGLE_QUOTA_ERRORS_JS" >&2; exit 1; }
 [ -f "$CLI_CONFIG_JS" ] || { echo "missing $CLI_CONFIG_JS" >&2; exit 1; }
 [ -f "$CLI_GEMINI_JS" ] || { echo "missing $CLI_GEMINI_JS" >&2; exit 1; }
 [ -f "$CLI_NONINTERACTIVE_JS" ] || { echo "missing $CLI_NONINTERACTIVE_JS" >&2; exit 1; }
+[ -f "$USE_QUOTA_FALLBACK_JS" ] || { echo "missing $USE_QUOTA_FALLBACK_JS" >&2; exit 1; }
 
-python3 - "$INDEX" "$SHELL_JS" "$GETPTY_JS" "$POLICYCATALOG_JS" "$HANDLER_JS" "$GEMINICHAT_JS" "$CLIENT_JS" "$TOOLEXECUTOR_JS" "$AUTH_JS" "$INITIALIZER_JS" "$USEAUTH_JS" "$APPCONTAINER_JS" "$CLI_CONFIG_JS" "$CLI_GEMINI_JS" "$CLI_NONINTERACTIVE_JS" <<'PY'
+python3 - "$INDEX" "$SHELL_JS" "$GETPTY_JS" "$POLICYCATALOG_JS" "$HANDLER_JS" "$GEMINICHAT_JS" "$CLIENT_JS" "$TOOLEXECUTOR_JS" "$AUTH_JS" "$INITIALIZER_JS" "$USEAUTH_JS" "$APPCONTAINER_JS" "$CLI_CONFIG_JS" "$CLI_GEMINI_JS" "$CLI_NONINTERACTIVE_JS" "$GOOGLE_QUOTA_ERRORS_JS" "$CORE_CONFIG_JS" "$USE_QUOTA_FALLBACK_JS" <<'PY'
 from pathlib import Path
 import sys
 import re
@@ -84,6 +90,9 @@ appcontainer = Path(sys.argv[12])
 cli_config = Path(sys.argv[13])
 cli_gemini = Path(sys.argv[14])
 cli_noninteractive = Path(sys.argv[15])
+google_quota_errors = Path(sys.argv[16])
+core_config = Path(sys.argv[17])
+use_quota_fallback = Path(sys.argv[18])
 
 def replace_once_or_skip(text, old, new):
     if new in text:
@@ -142,12 +151,21 @@ index.write_text(text)
 
 text = shell.read_text()
 text = replace_once_or_fail(text, 'pgrep -g 0', 'pgrep -P $$', 'shell_pgrep_fix')
-text = replace_once_or_fail(
-    text,
+# Upstream shell tool has used multiple receiver forms across versions.
+# Normalize all known callsites so patching remains version-tolerant.
+text = text.replace(
     'this.config.getEnableInteractiveShell()',
     'this.config.isInteractiveShellEnabled()',
-    'shell_interactive_getter_fix',
 )
+text = text.replace(
+    'this.context.config.getEnableInteractiveShell()',
+    'this.context.config.isInteractiveShellEnabled()',
+)
+text = text.replace(
+    'context.config.getEnableInteractiveShell()',
+    'context.config.isInteractiveShellEnabled()',
+)
+require_contains(text, 'isInteractiveShellEnabled()', 'shell_interactive_getter_fix')
 shell.write_text(text)
 
 text = getpty.read_text()
@@ -174,19 +192,67 @@ text = text.replace(
     "const DEFAULT_CHAIN = [\n    definePolicy({ model: DEFAULT_GEMINI_MODEL }),\n    definePolicy({ model: DEFAULT_GEMINI_FLASH_MODEL, isLastResort: true }),\n];",
     "const DEFAULT_CHAIN = [\n    definePolicy({ model: DEFAULT_GEMINI_MODEL }),\n    definePolicy({ model: DEFAULT_GEMINI_FLASH_MODEL }),\n    definePolicy({ model: DEFAULT_GEMINI_FLASH_LITE_MODEL, isLastResort: true }),\n];",
 )
-old = "        return [\n            definePolicy({ model: previewModel }),\n            definePolicy({ model: PREVIEW_GEMINI_FLASH_MODEL, isLastResort: true }),\n        ];"
-new = "        return [\n            definePolicy({\n                model: previewModel,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: DEFAULT_GEMINI_MODEL,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: PREVIEW_GEMINI_FLASH_MODEL,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: DEFAULT_GEMINI_FLASH_MODEL,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: DEFAULT_GEMINI_FLASH_LITE_MODEL,\n                isLastResort: true,\n                actions: SILENT_ACTIONS,\n            }),\n        ];"
-if old in text:
-    text = text.replace(old, new, 1)
-text = text.replace(
-    "            definePolicy({\n                model: PREVIEW_GEMINI_FLASH_MODEL,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: DEFAULT_GEMINI_FLASH_LITE_MODEL,\n                isLastResort: true,\n                actions: SILENT_ACTIONS,\n            }),",
-    "            definePolicy({\n                model: DEFAULT_GEMINI_MODEL,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: PREVIEW_GEMINI_FLASH_MODEL,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: DEFAULT_GEMINI_FLASH_MODEL,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: DEFAULT_GEMINI_FLASH_LITE_MODEL,\n                isLastResort: true,\n                actions: SILENT_ACTIONS,\n            }),",
+canonical_preview_block = "if (options.previewEnabled) {\n        const previewModel = resolveModel(PREVIEW_GEMINI_MODEL, options.useGemini31, options.useCustomToolModel);\n        return [\n            definePolicy({ model: previewModel }),\n            definePolicy({ model: PREVIEW_GEMINI_FLASH_MODEL }),\n            definePolicy({ model: DEFAULT_GEMINI_FLASH_MODEL }),\n            definePolicy({ model: DEFAULT_GEMINI_FLASH_LITE_MODEL, isLastResort: true }),\n        ];\n    }"
+text = re.sub(
+    r"if \(options\.previewEnabled\) \{\n[\s\S]*?        \];\n    \}",
+    canonical_preview_block,
+    text,
+    count=1,
 )
-text = text.replace(
-    "            definePolicy({\n                model: DEFAULT_GEMINI_MODEL,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: DEFAULT_GEMINI_FLASH_MODEL,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: DEFAULT_GEMINI_FLASH_LITE_MODEL,\n                isLastResort: true,\n                actions: SILENT_ACTIONS,\n            }),",
-    "            definePolicy({\n                model: DEFAULT_GEMINI_MODEL,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: PREVIEW_GEMINI_FLASH_MODEL,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: DEFAULT_GEMINI_FLASH_MODEL,\n                actions: SILENT_ACTIONS,\n            }),\n            definePolicy({\n                model: DEFAULT_GEMINI_FLASH_LITE_MODEL,\n                isLastResort: true,\n                actions: SILENT_ACTIONS,\n            }),",
-)
+require_contains(text, "definePolicy({ model: PREVIEW_GEMINI_FLASH_MODEL })", 'policy_preview_flash_present')
+require_contains(text, "definePolicy({ model: DEFAULT_GEMINI_FLASH_LITE_MODEL, isLastResort: true })", 'policy_preview_last_resort_present')
 policycatalog.write_text(text)
+
+text = google_quota_errors.read_text()
+text = replace_once_or_skip(
+    text,
+    "                if (errorInfo.reason === 'QUOTA_EXHAUSTED') {\n                    return new TerminalQuotaError(`${googleApiError.message}`, googleApiError, delaySeconds, errorInfo.reason);\n                }\n",
+    "                if (errorInfo.reason === 'MODEL_CAPACITY_EXHAUSTED') {\n                    return new TerminalQuotaError(`${googleApiError.message}`, googleApiError, delaySeconds, errorInfo.reason);\n                }\n                if (errorInfo.reason === 'QUOTA_EXHAUSTED') {\n                    return new TerminalQuotaError(`${googleApiError.message}`, googleApiError, delaySeconds, errorInfo.reason);\n                }\n",
+)
+require_contains(text, "if (errorInfo.reason === 'MODEL_CAPACITY_EXHAUSTED')", 'quota_model_capacity_terminal')
+google_quota_errors.write_text(text)
+
+text = core_config.read_text()
+text = replace_once_or_skip(
+    text,
+    "import { DEFAULT_GEMINI_EMBEDDING_MODEL, DEFAULT_GEMINI_FLASH_MODEL, DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_MODEL_AUTO, isAutoModel, isPreviewModel, PREVIEW_GEMINI_FLASH_MODEL, PREVIEW_GEMINI_MODEL, PREVIEW_GEMINI_MODEL_AUTO, resolveModel, } from './models.js';",
+    "import { DEFAULT_GEMINI_EMBEDDING_MODEL, DEFAULT_GEMINI_FLASH_MODEL, DEFAULT_GEMINI_MODEL, DEFAULT_GEMINI_MODEL_AUTO, isAutoModel, isPreviewModel, PREVIEW_GEMINI_FLASH_MODEL, PREVIEW_GEMINI_MODEL, PREVIEW_GEMINI_3_1_MODEL, PREVIEW_GEMINI_MODEL_AUTO, resolveModel, } from './models.js';",
+)
+text = replace_once_or_skip(
+    text,
+    "    setHasAccessToPreviewModel(hasAccess) {\n        this.hasAccessToPreviewModel = hasAccess;\n    }\n",
+    "    setHasAccessToPreviewModel(hasAccess) {\n        this.hasAccessToPreviewModel = hasAccess;\n    }\n    normalizeQuotaModelId(modelId) {\n        switch (modelId) {\n            case 'gemini-3-pro':\n                return PREVIEW_GEMINI_MODEL;\n            case 'gemini-3-flash':\n                return PREVIEW_GEMINI_FLASH_MODEL;\n            case 'gemini-3.1-pro':\n                return PREVIEW_GEMINI_3_1_MODEL;\n            default:\n                return modelId;\n        }\n    }\n",
+)
+text = replace_once_or_skip(
+    text,
+    "                        const remaining = parseInt(bucket.remainingAmount, 10);\n                        const limit = bucket.remainingFraction > 0\n                            ? Math.round(remaining / bucket.remainingFraction)\n                            : (this.modelQuotas.get(bucket.modelId)?.limit ?? 0);\n                        if (!isNaN(remaining) && Number.isFinite(limit) && limit > 0) {\n                            this.modelQuotas.set(bucket.modelId, {\n",
+    "                        const quotaModelId = this.normalizeQuotaModelId(bucket.modelId);\n                        const remaining = parseInt(bucket.remainingAmount, 10);\n                        const limit = bucket.remainingFraction > 0\n                            ? Math.round(remaining / bucket.remainingFraction)\n                            : (this.modelQuotas.get(quotaModelId)?.limit ?? 0);\n                        if (!isNaN(remaining) && Number.isFinite(limit) && limit > 0) {\n                            this.modelQuotas.set(quotaModelId, {\n",
+)
+text = replace_once_or_skip(
+    text,
+    "            const hasAccess = quota.buckets?.some((b) => b.modelId && isPreviewModel(b.modelId)) ??\n                false;",
+    "            const hasAccess = quota.buckets?.some((b) => {\n                if (!b.modelId) {\n                    return false;\n                }\n                return isPreviewModel(this.normalizeQuotaModelId(b.modelId));\n            }) ?? false;",
+)
+require_contains(text, "PREVIEW_GEMINI_3_1_MODEL", 'core_config_preview_model_import')
+require_contains(text, "normalizeQuotaModelId(modelId)", 'core_config_quota_model_normalization')
+core_config.write_text(text)
+
+text = use_quota_fallback.read_text()
+text = text.replace(
+    "            const disableModelFallback = settings?.merged?.general?.disableModelFallback === true ||\n                process.env['GEMINI_CLI_DISABLE_MODEL_FALLBACK'] === '1';\n",
+    "",
+)
+text = text.replace(
+    "            if (disableModelFallback) {\n                return 'stop';\n            }\n",
+    "            return 'stop'; // patched_no_auto_fallback_ui\n",
+)
+text = replace_once_or_skip(
+    text,
+    "            // In low verbosity mode, auto-retry transient capacity failures\n",
+    "            return 'stop'; // patched_no_auto_fallback_ui\n            // In low verbosity mode, auto-retry transient capacity failures\n",
+)
+require_contains(text, "patched_no_auto_fallback_ui", 'disable_fallback_default_ui')
+use_quota_fallback.write_text(text)
 
 text = handler.read_text()
 text = text.replace("import { AuthType } from '../core/contentGenerator.js';\n", "")
@@ -195,9 +261,25 @@ text = text.replace(
     "export async function handleFallback(config, failedModel, authType, error, options = {}) {\n",
 )
 text = text.replace(
+    "export async function handleFallback(config, failedModel, authType, error) {\n",
+    "export async function handleFallback(config, failedModel, authType, error, options = {}) {\n",
+)
+text = text.replace(
+    "    if (process.env['GEMINI_CLI_DISABLE_MODEL_FALLBACK'] === '1') {\n        return false;\n    }\n",
+    "",
+)
+if "patched_no_auto_fallback_core" not in text:
+    text = text.replace(
+        "export async function handleFallback(config, failedModel, authType, error, options = {}) {\n",
+        "export async function handleFallback(config, failedModel, authType, error, options = {}) {\n    return false; // patched_no_auto_fallback_core\n",
+        1,
+    )
+text = text.replace(
     "if (action === 'silent') {",
     "if (action === 'silent' || options.forceSilent) {",
 )
+require_contains(text, "options = {}", 'handler_options_signature')
+require_contains(text, "patched_no_auto_fallback_core", 'handler_disable_fallback_default')
 handler.write_text(text)
 
 text = geminichat.read_text()
@@ -337,7 +419,6 @@ if "    if (!skipExtensionLoad) {\n        await extensionManager.loadExtensions
     )
 
 # Keep exactly one extensionPlanSettings declaration in a canonical form.
-experimental_line = "    const experimentalJitContext = settings.experimental?.jitContext ?? false;\n"
 canonical_extension_plan = (
     "    const extensionPlanSettings = skipExtensionLoad\n"
     "        ? undefined\n"
@@ -345,11 +426,13 @@ canonical_extension_plan = (
     "            .getExtensions()\n"
     "            .find((ext) => ext.isActive && ext.plan?.directory)?.plan;\n"
 )
-if experimental_line in text:
-    before, after = text.split(experimental_line, 1)
-    before = re.sub(r"\n[ \t]*const extensionPlanSettings =[\s\S]*?;\n", "\n", before)
-    before = before.rstrip() + "\n" + canonical_extension_plan
-    text = before + experimental_line + after
+if canonical_extension_plan not in text:
+    text = re.sub(
+        r"(?ms)^[ \t]*const extensionPlanSettings =[\s\S]*?;\n",
+        canonical_extension_plan,
+        text,
+        count=1,
+    )
 
 text = replace_once_or_skip(
     text,
