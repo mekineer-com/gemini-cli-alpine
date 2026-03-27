@@ -50,6 +50,8 @@ INITIALIZER_JS="$CLI_DIST/core/initializer.js"
 USEAUTH_JS="$CLI_DIST/ui/auth/useAuth.js"
 APPCONTAINER_JS="$CLI_DIST/ui/AppContainer.js"
 GOOGLE_QUOTA_ERRORS_JS="$CORE/src/utils/googleQuotaErrors.js"
+SESSION_BROWSER_JS="$CLI_DIST/ui/components/SessionBrowser.js"
+USE_SESSION_BROWSER_JS="$CLI_DIST/ui/hooks/useSessionBrowser.js"
 
 [ -f "$INDEX" ] || { echo "missing $INDEX" >&2; exit 1; }
 [ -f "$SHELL_JS" ] || { echo "missing $SHELL_JS" >&2; exit 1; }
@@ -65,12 +67,14 @@ GOOGLE_QUOTA_ERRORS_JS="$CORE/src/utils/googleQuotaErrors.js"
 [ -f "$USEAUTH_JS" ] || { echo "missing $USEAUTH_JS" >&2; exit 1; }
 [ -f "$APPCONTAINER_JS" ] || { echo "missing $APPCONTAINER_JS" >&2; exit 1; }
 [ -f "$GOOGLE_QUOTA_ERRORS_JS" ] || { echo "missing $GOOGLE_QUOTA_ERRORS_JS" >&2; exit 1; }
+[ -f "$SESSION_BROWSER_JS" ] || { echo "missing $SESSION_BROWSER_JS" >&2; exit 1; }
+[ -f "$USE_SESSION_BROWSER_JS" ] || { echo "missing $USE_SESSION_BROWSER_JS" >&2; exit 1; }
 [ -f "$CLI_CONFIG_JS" ] || { echo "missing $CLI_CONFIG_JS" >&2; exit 1; }
 [ -f "$CLI_GEMINI_JS" ] || { echo "missing $CLI_GEMINI_JS" >&2; exit 1; }
 [ -f "$CLI_NONINTERACTIVE_JS" ] || { echo "missing $CLI_NONINTERACTIVE_JS" >&2; exit 1; }
 [ -f "$USE_QUOTA_FALLBACK_JS" ] || { echo "missing $USE_QUOTA_FALLBACK_JS" >&2; exit 1; }
 
-python3 - "$INDEX" "$SHELL_JS" "$GETPTY_JS" "$POLICYCATALOG_JS" "$HANDLER_JS" "$GEMINICHAT_JS" "$CLIENT_JS" "$TOOLEXECUTOR_JS" "$AUTH_JS" "$INITIALIZER_JS" "$USEAUTH_JS" "$APPCONTAINER_JS" "$CLI_CONFIG_JS" "$CLI_GEMINI_JS" "$CLI_NONINTERACTIVE_JS" "$GOOGLE_QUOTA_ERRORS_JS" "$CORE_CONFIG_JS" "$USE_QUOTA_FALLBACK_JS" <<'PY'
+python3 - "$INDEX" "$SHELL_JS" "$GETPTY_JS" "$POLICYCATALOG_JS" "$HANDLER_JS" "$GEMINICHAT_JS" "$CLIENT_JS" "$TOOLEXECUTOR_JS" "$AUTH_JS" "$INITIALIZER_JS" "$USEAUTH_JS" "$APPCONTAINER_JS" "$CLI_CONFIG_JS" "$CLI_GEMINI_JS" "$CLI_NONINTERACTIVE_JS" "$GOOGLE_QUOTA_ERRORS_JS" "$CORE_CONFIG_JS" "$USE_QUOTA_FALLBACK_JS" "$SESSION_BROWSER_JS" "$USE_SESSION_BROWSER_JS" <<'PY'
 from pathlib import Path
 import sys
 import re
@@ -93,6 +97,8 @@ cli_noninteractive = Path(sys.argv[15])
 google_quota_errors = Path(sys.argv[16])
 core_config = Path(sys.argv[17])
 use_quota_fallback = Path(sys.argv[18])
+session_browser = Path(sys.argv[19])
+use_session_browser = Path(sys.argv[20])
 
 def replace_once_or_skip(text, old, new):
     if new in text:
@@ -492,6 +498,40 @@ require_contains(
     'noninteractive_error_ordering',
 )
 cli_noninteractive.write_text(text)
+
+text = use_session_browser.read_text()
+text = text.replace(
+    "        handleDeleteSession: useCallback((session) => {",
+    "        handleDeleteSession: useCallback(async (session) => {",
+)
+text = text.replace(
+    "                    chatRecordingService.deleteSession(session.file);",
+    "                    await Promise.resolve(chatRecordingService.deleteSession(session.file));",
+)
+require_contains(
+    text,
+    "handleDeleteSession: useCallback(async (session) => {",
+    'session_delete_handler_async',
+)
+require_contains(
+    text,
+    "await Promise.resolve(chatRecordingService.deleteSession(session.file));",
+    'session_delete_handler_promise_return',
+)
+use_session_browser.write_text(text)
+
+text = session_browser.read_text()
+text = replace_once_or_skip(
+    text,
+    "                if (selectedSession && !selectedSession.isCurrentSession) {\n",
+    "                if (selectedSession?.isCurrentSession) {\n                    state.setError('Cannot delete the current active session.');\n                }\n                else if (selectedSession) {\n",
+)
+require_contains(
+    text,
+    "Cannot delete the current active session.",
+    'session_delete_current_feedback',
+)
+session_browser.write_text(text)
 PY
 
 # Install diagnostics only when explicitly requested.
