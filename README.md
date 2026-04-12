@@ -22,12 +22,7 @@ Current scope:
 - faster Alpine startup path
 - noninteractive JSON error-output fix
 - BusyBox-safe terminal parent detection for `/terminal-setup`
-- silent preview-model fallback:
-  - `gemini-3-pro-preview`
-  - `gemini-2.5-pro`
-  - `gemini-3-flash-preview`
-  - `gemini-2.5-flash`
-  - `gemini-2.5-flash-lite`
+- no automatic model demotion (fallback disabled by patch default)
 
 ## Quick Start
 
@@ -111,12 +106,8 @@ Patch groups and rollback guidance:
 
 ## Current practical model guidance
 
-- default working baseline:
-  - `gemini-2.5-flash-lite`
-- preview path now degrades automatically if quota/model access fails:
-  - `gemini-3-pro-preview -> gemini-2.5-pro -> gemini-3-flash-preview -> gemini-2.5-flash -> gemini-2.5-flash-lite`
-
-This improves reliability, but it does not increase preview quota.
+- default behavior: no automatic fallback/demotion
+- if `gemini-3.x` capacity is exhausted, the turn fails explicitly instead of silently switching models
 
 ## Architecture Map
 

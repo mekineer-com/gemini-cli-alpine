@@ -109,6 +109,10 @@ parent_detect_hits = 0
 pgrep_hits = 0
 terminal_meta_hits = 0
 getpty_hits = 0
+anti_demotion_core_hits = 0
+anti_demotion_ui_hits = 0
+parent_detect_present = 0
+pgrep_present = 0
 
 for file_path in js_files:
     src = file_path.read_text()
@@ -118,6 +122,7 @@ for file_path in js_files:
         c = out.count("pgrep -g 0")
         pgrep_hits += c
         out = out.replace("pgrep -g 0", "pgrep -P $$")
+    pgrep_present += out.count("pgrep -P $$")
 
     old_parent_cmd = 'execAsync("ps -o comm= -p $PPID")'
     new_parent_cmd = 'execAsync("sh -c \'if [ -r /proc/$PPID/comm ]; then cat /proc/$PPID/comm; else ps -o comm= -p $PPID; fi\'")'
@@ -125,11 +130,30 @@ for file_path in js_files:
         c = out.count(old_parent_cmd)
         parent_detect_hits += c
         out = out.replace(old_parent_cmd, new_parent_cmd)
+    parent_detect_present += out.count(new_parent_cmd)
 
     if "return TERMINAL_DATA[terminal] || null;" in out:
         c = out.count("return TERMINAL_DATA[terminal] || null;")
         terminal_meta_hits += c
         out = out.replace("return TERMINAL_DATA[terminal] || null;", "return TERMINAL_DATA[terminal];")
+
+    if "patched_no_auto_fallback_core_bundle" not in out:
+        core_pat = re.compile(
+            r'(async function handleFallback\([^)]*\) \{\n)(\s*const chain\d* = resolvePolicyChain\([^)]*\);\n)'
+        )
+        out, _ = core_pat.subn(
+            r'\1  return false; // patched_no_auto_fallback_core_bundle\n\2',
+            out,
+        )
+
+    if "patched_no_auto_fallback_ui_bundle" not in out:
+        ui_pat = re.compile(
+            r'(const fallbackHandler = async \([^)]*\) => \{\n)(\s*)const contentGeneratorConfig = config\.getContentGeneratorConfig\(\);\n'
+        )
+        out, _ = ui_pat.subn(
+            r'\1\2return "stop"; // patched_no_auto_fallback_ui_bundle\n\2const contentGeneratorConfig = config.getContentGeneratorConfig();\n',
+            out,
+        )
 
     first_pat = re.compile(
         r'const lydell = "@lydell/node-pty";\n    const (\w+) = await import\(lydell\);\n    return \{ module: \1, name: "lydell-node-pty" \};'
@@ -150,16 +174,23 @@ for file_path in js_files:
             out,
         )
 
+    anti_demotion_core_hits += out.count("patched_no_auto_fallback_core_bundle")
+    anti_demotion_ui_hits += out.count("patched_no_auto_fallback_ui_bundle")
+
     if out != src:
         file_path.write_text(out)
 
-if parent_detect_hits == 0:
+if parent_detect_hits == 0 and parent_detect_present == 0:
     raise RuntimeError("critical patch verification failed: bundle_terminal_parent_detect")
-if pgrep_hits == 0:
+if pgrep_hits == 0 and pgrep_present == 0:
     raise RuntimeError("critical patch verification failed: bundle_shell_pgrep_fix")
+if anti_demotion_core_hits == 0:
+    raise RuntimeError("critical patch verification failed: bundle_disable_fallback_core")
+if anti_demotion_ui_hits == 0:
+    raise RuntimeError("critical patch verification failed: bundle_disable_fallback_ui")
 
 print(
-    f"bundle_patch_stats parent_detect={parent_detect_hits} pgrep={pgrep_hits} terminal_meta={terminal_meta_hits} getpty={getpty_hits}"
+    f"bundle_patch_stats parent_detect={parent_detect_hits} parent_detect_present={parent_detect_present} pgrep={pgrep_hits} pgrep_present={pgrep_present} terminal_meta={terminal_meta_hits} getpty={getpty_hits} anti_demotion_core={anti_demotion_core_hits} anti_demotion_ui={anti_demotion_ui_hits}"
 )
 PY
 
