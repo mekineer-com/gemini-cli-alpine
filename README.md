@@ -21,6 +21,7 @@ Current scope:
 - auth-startup fix
 - faster Alpine startup path
 - noninteractive JSON error-output fix
+- BusyBox-safe terminal parent detection for `/terminal-setup`
 - silent preview-model fallback:
   - `gemini-3-pro-preview`
   - `gemini-2.5-pro`

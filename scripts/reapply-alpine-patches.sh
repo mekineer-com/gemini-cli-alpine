@@ -52,6 +52,7 @@ APPCONTAINER_JS="$CLI_DIST/ui/AppContainer.js"
 GOOGLE_QUOTA_ERRORS_JS="$CORE/src/utils/googleQuotaErrors.js"
 SESSION_BROWSER_JS="$CLI_DIST/ui/components/SessionBrowser.js"
 USE_SESSION_BROWSER_JS="$CLI_DIST/ui/hooks/useSessionBrowser.js"
+TERMINAL_SETUP_JS="$CLI_DIST/ui/utils/terminalSetup.js"
 
 [ -f "$INDEX" ] || { echo "missing $INDEX" >&2; exit 1; }
 [ -f "$SHELL_JS" ] || { echo "missing $SHELL_JS" >&2; exit 1; }
@@ -69,12 +70,13 @@ USE_SESSION_BROWSER_JS="$CLI_DIST/ui/hooks/useSessionBrowser.js"
 [ -f "$GOOGLE_QUOTA_ERRORS_JS" ] || { echo "missing $GOOGLE_QUOTA_ERRORS_JS" >&2; exit 1; }
 [ -f "$SESSION_BROWSER_JS" ] || { echo "missing $SESSION_BROWSER_JS" >&2; exit 1; }
 [ -f "$USE_SESSION_BROWSER_JS" ] || { echo "missing $USE_SESSION_BROWSER_JS" >&2; exit 1; }
+[ -f "$TERMINAL_SETUP_JS" ] || { echo "missing $TERMINAL_SETUP_JS" >&2; exit 1; }
 [ -f "$CLI_CONFIG_JS" ] || { echo "missing $CLI_CONFIG_JS" >&2; exit 1; }
 [ -f "$CLI_GEMINI_JS" ] || { echo "missing $CLI_GEMINI_JS" >&2; exit 1; }
 [ -f "$CLI_NONINTERACTIVE_JS" ] || { echo "missing $CLI_NONINTERACTIVE_JS" >&2; exit 1; }
 [ -f "$USE_QUOTA_FALLBACK_JS" ] || { echo "missing $USE_QUOTA_FALLBACK_JS" >&2; exit 1; }
 
-python3 - "$INDEX" "$SHELL_JS" "$GETPTY_JS" "$POLICYCATALOG_JS" "$HANDLER_JS" "$GEMINICHAT_JS" "$CLIENT_JS" "$TOOLEXECUTOR_JS" "$AUTH_JS" "$INITIALIZER_JS" "$USEAUTH_JS" "$APPCONTAINER_JS" "$CLI_CONFIG_JS" "$CLI_GEMINI_JS" "$CLI_NONINTERACTIVE_JS" "$GOOGLE_QUOTA_ERRORS_JS" "$CORE_CONFIG_JS" "$USE_QUOTA_FALLBACK_JS" "$SESSION_BROWSER_JS" "$USE_SESSION_BROWSER_JS" <<'PY'
+python3 - "$INDEX" "$SHELL_JS" "$GETPTY_JS" "$POLICYCATALOG_JS" "$HANDLER_JS" "$GEMINICHAT_JS" "$CLIENT_JS" "$TOOLEXECUTOR_JS" "$AUTH_JS" "$INITIALIZER_JS" "$USEAUTH_JS" "$APPCONTAINER_JS" "$CLI_CONFIG_JS" "$CLI_GEMINI_JS" "$CLI_NONINTERACTIVE_JS" "$GOOGLE_QUOTA_ERRORS_JS" "$CORE_CONFIG_JS" "$USE_QUOTA_FALLBACK_JS" "$SESSION_BROWSER_JS" "$USE_SESSION_BROWSER_JS" "$TERMINAL_SETUP_JS" <<'PY'
 from pathlib import Path
 import sys
 import re
@@ -99,6 +101,7 @@ core_config = Path(sys.argv[17])
 use_quota_fallback = Path(sys.argv[18])
 session_browser = Path(sys.argv[19])
 use_session_browser = Path(sys.argv[20])
+terminal_setup = Path(sys.argv[21])
 
 def replace_once_or_skip(text, old, new):
     if new in text:
@@ -404,6 +407,70 @@ text = text.replace(
     "useAuthCommand(settings, config, initializationResult.authError, initializationResult.accountSuspensionInfo, initializationResult.initialAuthSucceeded)",
 )
 appcontainer.write_text(text)
+
+text = terminal_setup.read_text()
+text = replace_once_or_skip(
+    text,
+    "function getSupportedTerminalData(terminal) {\n    return TERMINAL_DATA[terminal] || null;\n}",
+    "function getSupportedTerminalData(terminal) {\n    return TERMINAL_DATA[terminal];\n}",
+)
+text = replace_once_or_skip(
+    text,
+    "return null;\n}\n// Terminal detection",
+    "return null;\n}\nfunction detectFromParentName(parentName) {\n    const normalized = parentName.toLowerCase();\n    if (normalized.includes('windsurf'))\n        return 'windsurf';\n    if (normalized.includes('antigravity'))\n        return 'antigravity';\n    if (normalized.includes('cursor'))\n        return 'cursor';\n    if (normalized.includes('code'))\n        return 'vscode';\n    return null;\n}\n// Terminal detection",
+)
+terminal_detect_block = (
+    "// Terminal detection\n"
+    "async function detectTerminal() {\n"
+    "    const envTerminal = getTerminalProgram();\n"
+    "    if (envTerminal) {\n"
+    "        return envTerminal;\n"
+    "    }\n"
+    "    const platform = os.platform();\n"
+    "    if (platform === 'win32') {\n"
+    "        return null;\n"
+    "    }\n"
+    "    if (platform === 'linux') {\n"
+    "        const ppid = process.ppid;\n"
+    "        if (!Number.isInteger(ppid) || ppid <= 1) {\n"
+    "            return null;\n"
+    "        }\n"
+    "        try {\n"
+    "            const comm = await fs.readFile(`/proc/${ppid}/comm`, 'utf8');\n"
+    "            return detectFromParentName(comm.trim());\n"
+    "        }\n"
+    "        catch (error) {\n"
+    "            debugLogger.debug('Parent process detection failed:', error);\n"
+    "            return null;\n"
+    "        }\n"
+    "    }\n"
+    "    try {\n"
+    "        const { stdout } = await execAsync(`ps -o comm= -p ${process.ppid}`);\n"
+    "        return detectFromParentName(stdout.trim());\n"
+    "    }\n"
+    "    catch (error) {\n"
+    "        debugLogger.debug('Parent process detection failed:', error);\n"
+    "        return null;\n"
+    "    }\n"
+    "}\n"
+)
+text = re.sub(
+    r"(?s)// Terminal detection\nasync function detectTerminal\(\) \{.*?\n\}\n// Backup file helper",
+    terminal_detect_block + "// Backup file helper",
+    text,
+    count=1,
+)
+text = text.replace(
+    "    if (!terminalData) {\n        return false;\n    }\n",
+    "",
+)
+text = text.replace(
+    "    if (!terminalData) {\n        return {\n            success: false,\n            message: `Terminal \"${terminal}\" is not supported yet.`,\n        };\n    }\n",
+    "",
+)
+require_contains(text, "/proc/${ppid}/comm", 'terminal_setup_linux_proc_detect')
+require_contains(text, "return TERMINAL_DATA[terminal];", 'terminal_setup_single_path_metadata')
+terminal_setup.write_text(text)
 
 text = cli_config.read_text()
 old = "export async function loadCliConfig(settings, sessionId, argv, options = {}) {\n    const { cwd = process.cwd(), projectHooks } = options;"

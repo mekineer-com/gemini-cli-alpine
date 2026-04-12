@@ -15,6 +15,10 @@ These are required for correct/usable behavior on Alpine + BusyBox.
 - Why: default PTY path is less reliable on Alpine; `pgrep -g 0` behavior is not portable.
 - Effect: interactive shell/tool sessions are more stable on Alpine.
 
+3. BusyBox-safe terminal parent detection (`/terminal-setup` path)
+- Why: BusyBox `ps` does not support `-p`, so parent-process detection can fail/noise in debug flows.
+- Effect: Linux uses `/proc/<ppid>/comm` for detection; avoids BusyBox `ps -p` errors.
+
 ## Recommended
 
 These preserve functionality while improving reliability under real workloads.
