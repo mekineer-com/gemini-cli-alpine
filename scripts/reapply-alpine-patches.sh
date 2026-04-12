@@ -30,6 +30,7 @@ for arg in "$@"; do
 done
 
 ROOT="$PREFIX/lib/node_modules/@google/gemini-cli"
+PACKAGE_JSON="$ROOT/package.json"
 INDEX="$ROOT/dist/index.js"
 CORE="$ROOT/node_modules/@google/gemini-cli-core/dist"
 CLI_DIST="$ROOT/dist/src"
@@ -53,7 +54,127 @@ GOOGLE_QUOTA_ERRORS_JS="$CORE/src/utils/googleQuotaErrors.js"
 SESSION_BROWSER_JS="$CLI_DIST/ui/components/SessionBrowser.js"
 USE_SESSION_BROWSER_JS="$CLI_DIST/ui/hooks/useSessionBrowser.js"
 TERMINAL_SETUP_JS="$CLI_DIST/ui/utils/terminalSetup.js"
+BUNDLE_DIR="$ROOT/bundle"
+BUNDLE_GEMINI="$BUNDLE_DIR/gemini.js"
 
+[ -f "$PACKAGE_JSON" ] || { echo "missing $PACKAGE_JSON" >&2; exit 1; }
+
+VERSION="$(python3 - "$PACKAGE_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+pkg = json.loads(Path(sys.argv[1]).read_text())
+print(pkg.get("version", "unknown"))
+PY
+)"
+echo "detected gemini-cli version: $VERSION"
+
+if [ ! -f "$INDEX" ] && [ -f "$BUNDLE_GEMINI" ]; then
+  echo "patch mode: bundled layout (0.36+)"
+  python3 - "$BUNDLE_GEMINI" "$BUNDLE_DIR" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+entry = Path(sys.argv[1])
+bundle_dir = Path(sys.argv[2])
+
+def replace_once_or_skip(text, old, new):
+    if new in text:
+        return text
+    if old in text:
+        return text.replace(old, new, 1)
+    return text
+
+text = entry.read_text()
+if text.startswith('#!/usr/bin/env -S node --no-warnings=DEP0040'):
+    text = text.replace('#!/usr/bin/env -S node --no-warnings=DEP0040', '#!/usr/bin/node --no-warnings=DEP0040', 1)
+elif text.startswith('#!/usr/bin/env node'):
+    text = text.replace('#!/usr/bin/env node', '#!/usr/bin/node --no-warnings=DEP0040', 1)
+
+if "GEMINI_CLI_FORCE_RELAUNCH" not in text:
+    marker = "const require = (await import('node:module')).createRequire(import.meta.url); const __chunk_filename = (await import('node:url')).fileURLToPath(import.meta.url); const __chunk_dirname = (await import('node:path')).dirname(__chunk_filename);\n"
+    injection = marker + "const existsSync = (await import('node:fs')).existsSync;\nif (process.platform === \"linux\" && existsSync(\"/etc/alpine-release\") && !process.env[\"GEMINI_CLI_NO_RELAUNCH\"] && !process.env[\"GEMINI_CLI_FORCE_RELAUNCH\"]) {\n  process.env[\"GEMINI_CLI_NO_RELAUNCH\"] = \"true\";\n}\n"
+    if marker not in text:
+        raise RuntimeError("critical patch missing marker: bundle_entry_header")
+    text = text.replace(marker, injection, 1)
+
+entry.write_text(text)
+
+js_files = sorted(bundle_dir.glob("*.js"))
+if not js_files:
+    raise RuntimeError("critical patch missing marker: bundle_js_files")
+
+parent_detect_hits = 0
+pgrep_hits = 0
+terminal_meta_hits = 0
+getpty_hits = 0
+
+for file_path in js_files:
+    src = file_path.read_text()
+    out = src
+
+    if "pgrep -g 0" in out:
+        c = out.count("pgrep -g 0")
+        pgrep_hits += c
+        out = out.replace("pgrep -g 0", "pgrep -P $$")
+
+    old_parent_cmd = 'execAsync("ps -o comm= -p $PPID")'
+    new_parent_cmd = 'execAsync("sh -c \'if [ -r /proc/$PPID/comm ]; then cat /proc/$PPID/comm; else ps -o comm= -p $PPID; fi\'")'
+    if old_parent_cmd in out:
+        c = out.count(old_parent_cmd)
+        parent_detect_hits += c
+        out = out.replace(old_parent_cmd, new_parent_cmd)
+
+    if "return TERMINAL_DATA[terminal] || null;" in out:
+        c = out.count("return TERMINAL_DATA[terminal] || null;")
+        terminal_meta_hits += c
+        out = out.replace("return TERMINAL_DATA[terminal] || null;", "return TERMINAL_DATA[terminal];")
+
+    first_pat = re.compile(
+        r'const lydell = "@lydell/node-pty";\n    const (\w+) = await import\(lydell\);\n    return \{ module: \1, name: "lydell-node-pty" \};'
+    )
+    if first_pat.search(out):
+        getpty_hits += 1
+        out = first_pat.sub(
+            'const firstChoice = process.platform === "linux" ? "node-pty" : "@lydell/node-pty";\n    const firstName = process.platform === "linux" ? "node-pty" : "lydell-node-pty";\n    const \\1 = await import(firstChoice);\n    return { module: \\1, name: firstName };',
+            out,
+        )
+
+    second_pat = re.compile(
+        r'const nodePty = "node-pty";\n      const (\w+) = await import\(nodePty\);\n      return \{ module: \1, name: "node-pty" \};'
+    )
+    if second_pat.search(out):
+        out = second_pat.sub(
+            'const secondChoice = process.platform === "linux" ? "@lydell/node-pty" : "node-pty";\n      const secondName = process.platform === "linux" ? "lydell-node-pty" : "node-pty";\n      const \\1 = await import(secondChoice);\n      return { module: \\1, name: secondName };',
+            out,
+        )
+
+    if out != src:
+        file_path.write_text(out)
+
+if parent_detect_hits == 0:
+    raise RuntimeError("critical patch verification failed: bundle_terminal_parent_detect")
+if pgrep_hits == 0:
+    raise RuntimeError("critical patch verification failed: bundle_shell_pgrep_fix")
+
+print(
+    f"bundle_patch_stats parent_detect={parent_detect_hits} pgrep={pgrep_hits} terminal_meta={terminal_meta_hits} getpty={getpty_hits}"
+)
+PY
+
+  SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+  if [ "$INSTALL_DIAGNOSTICS" -eq 1 ]; then
+    "$SCRIPT_DIR/install-gemini-diagnostics.sh" "$PREFIX"
+  else
+    echo "diagnostics not installed (use --with-diagnostics to enable)"
+  fi
+
+  echo "patched $ROOT"
+  exit 0
+fi
+
+echo "patch mode: legacy dist layout (0.35.x and earlier)"
 [ -f "$INDEX" ] || { echo "missing $INDEX" >&2; exit 1; }
 [ -f "$SHELL_JS" ] || { echo "missing $SHELL_JS" >&2; exit 1; }
 [ -f "$GETPTY_JS" ] || { echo "missing $GETPTY_JS" >&2; exit 1; }

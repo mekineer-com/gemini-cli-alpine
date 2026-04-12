@@ -49,6 +49,10 @@ Reapply patches after reinstall:
 ./scripts/reapply-alpine-patches.sh [PREFIX]
 ```
 
+Patch mode is selected automatically by installed package layout:
+- legacy `dist/` layout (0.35.x and earlier): full Alpine patch set
+- bundled `bundle/` layout (0.36+): Alpine compatibility subset for the bundled build
+
 Reapply patches and also install diagnostics wrapper/helper:
 
 ```sh

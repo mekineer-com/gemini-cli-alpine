@@ -3,6 +3,10 @@
 This file groups the Alpine patch set by impact so users can decide how close
 to stock behavior they want.
 
+Patch coverage is version-range aware:
+- 0.35.x and earlier (`dist/` layout): full patch set below.
+- 0.36+ (`bundle/` layout): bundled compatibility subset (entrypoint, relaunch guard, shell pgrep fix, terminal parent detection, PTY preference order).
+
 ## Required
 
 These are required for correct/usable behavior on Alpine + BusyBox.
