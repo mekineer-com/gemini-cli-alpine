@@ -23,6 +23,7 @@ Current scope:
 - noninteractive JSON error-output fix
 - BusyBox-safe terminal parent detection for `/terminal-setup`
 - no automatic model demotion (fallback disabled by patch default)
+- steering/system scaffold leak guard (suppresses internal steering/system text echo and retries)
 
 ## Quick Start
 
@@ -32,10 +33,10 @@ User-local install:
 ./scripts/install-user-local.sh
 ```
 
-Install a specific version (default is `0.34.0`):
+Install a specific version (default is `0.38.1`):
 
 ```sh
-GEMINI_CLI_VERSION=0.34.0 ./scripts/install-user-local.sh
+GEMINI_CLI_VERSION=0.38.1 ./scripts/install-user-local.sh
 ```
 
 Reapply patches after reinstall:
