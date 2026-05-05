@@ -47,6 +47,10 @@ These preserve functionality while improving reliability under real workloads.
 - What: handle noninteractive errors before unsubscribing `UserFeedback` listeners.
 - Effect: avoids silent `exit 1` in JSON/headless flows when a turn fails mid-stream.
 
+6. Steering/system scaffold leak guard
+- What: detect leaked internal steering/system scaffold text (`User steering update` + `Internal instruction: Re-evaluate the active plan`, and `CRITICAL INSTRUCTION 1/2` + thought scaffold) in model content and treat it as invalid stream for retry instead of printing it.
+- Effect: prevents internal steering text from being shown to users when this model-side glitch occurs.
+
 ## Optional
 
 These are behavior choices, not compatibility fixes.

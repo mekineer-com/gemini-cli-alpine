@@ -113,6 +113,11 @@ anti_demotion_core_hits = 0
 anti_demotion_ui_hits = 0
 parent_detect_present = 0
 pgrep_present = 0
+steering_guard_hits = 0
+steering_guard_present = 0
+prompt_guard_hits = 0
+prompt_guard_present = 0
+invalid_stream_model_gate_hits = 0
 
 for file_path in js_files:
     src = file_path.read_text()
@@ -174,6 +179,53 @@ for file_path in js_files:
             out,
         )
 
+    if "patched_steering_leak_guard_bundle" not in out:
+        old_guard = 'if (event.type === "invalid_stream" /* InvalidStream */) {\n        isInvalidStream = true;\n      }'
+        new_guard = 'if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isInvalidStream = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === "invalid_stream" /* InvalidStream */) {\n        isInvalidStream = true;\n      }'
+        if old_guard in out:
+            steering_guard_hits += out.count(old_guard)
+            out = out.replace(old_guard, new_guard)
+        else:
+            old_guard_enum = 'if (event.type === GeminiEventType.InvalidStream) {\n        isInvalidStream = true;\n      }'
+            new_guard_enum = 'if (event.type === GeminiEventType.Content &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isInvalidStream = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === GeminiEventType.InvalidStream) {\n        isInvalidStream = true;\n      }'
+            if old_guard_enum in out:
+                steering_guard_hits += out.count(old_guard_enum)
+                out = out.replace(old_guard_enum, new_guard_enum)
+    steering_guard_present += out.count("patched_steering_leak_guard_bundle")
+
+    if "patched_prompt_leak_guard_bundle" not in out:
+        old_prompt_guard = 'if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isInvalidStream = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === "invalid_stream" /* InvalidStream */) {\n        isInvalidStream = true;\n      }'
+        new_prompt_guard = 'if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isInvalidStream = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("CRITICAL INSTRUCTION 1:") &&\n        event.value.includes("CRITICAL INSTRUCTION 2:") &&\n        (event.value.includes("[Thought: true]") || event.value.includes("Moving Towards the Goal"))) {\n        isInvalidStream = true; // patched_prompt_leak_guard_bundle\n        continue;\n      }\n      if (event.type === "invalid_stream" /* InvalidStream */) {\n        isInvalidStream = true;\n      }'
+        if old_prompt_guard in out:
+            prompt_guard_hits += out.count(old_prompt_guard)
+            out = out.replace(old_prompt_guard, new_prompt_guard)
+        else:
+            old_prompt_guard_enum = 'if (event.type === GeminiEventType.Content &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isInvalidStream = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === GeminiEventType.InvalidStream) {\n        isInvalidStream = true;\n      }'
+            new_prompt_guard_enum = 'if (event.type === GeminiEventType.Content &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isInvalidStream = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === GeminiEventType.Content &&\n        typeof event.value === "string" &&\n        event.value.includes("CRITICAL INSTRUCTION 1:") &&\n        event.value.includes("CRITICAL INSTRUCTION 2:") &&\n        (event.value.includes("[Thought: true]") || event.value.includes("Moving Towards the Goal"))) {\n        isInvalidStream = true; // patched_prompt_leak_guard_bundle\n        continue;\n      }\n      if (event.type === GeminiEventType.InvalidStream) {\n        isInvalidStream = true;\n      }'
+            if old_prompt_guard_enum in out:
+                prompt_guard_hits += out.count(old_prompt_guard_enum)
+                out = out.replace(old_prompt_guard_enum, new_prompt_guard_enum)
+    prompt_guard_present += out.count("patched_prompt_leak_guard_bundle")
+
+    old_order = 'yield event;\n      this.updateTelemetryTokenCount();\n      if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isInvalidStream = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("CRITICAL INSTRUCTION 1:") &&\n        event.value.includes("CRITICAL INSTRUCTION 2:") &&\n        (event.value.includes("[Thought: true]") || event.value.includes("Moving Towards the Goal"))) {\n        isInvalidStream = true; // patched_prompt_leak_guard_bundle\n        continue;\n      }\n      if (event.type === "invalid_stream" /* InvalidStream */) {\n        isInvalidStream = true;\n      }'
+    new_order = 'if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isInvalidStream = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("CRITICAL INSTRUCTION 1:") &&\n        event.value.includes("CRITICAL INSTRUCTION 2:") &&\n        (event.value.includes("[Thought: true]") || event.value.includes("Moving Towards the Goal"))) {\n        isInvalidStream = true; // patched_prompt_leak_guard_bundle\n        continue;\n      }\n      yield event;\n      this.updateTelemetryTokenCount();\n      if (event.type === "invalid_stream" /* InvalidStream */) {\n        isInvalidStream = true;\n      }'
+    if old_order in out:
+        out = out.replace(old_order, new_order)
+    old_order_enum = 'yield event;\n      this.updateTelemetryTokenCount();\n      if (event.type === GeminiEventType.Content &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isInvalidStream = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === GeminiEventType.Content &&\n        typeof event.value === "string" &&\n        event.value.includes("CRITICAL INSTRUCTION 1:") &&\n        event.value.includes("CRITICAL INSTRUCTION 2:") &&\n        (event.value.includes("[Thought: true]") || event.value.includes("Moving Towards the Goal"))) {\n        isInvalidStream = true; // patched_prompt_leak_guard_bundle\n        continue;\n      }\n      if (event.type === GeminiEventType.InvalidStream) {\n        isInvalidStream = true;\n      }'
+    new_order_enum = 'if (event.type === GeminiEventType.Content &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isInvalidStream = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === GeminiEventType.Content &&\n        typeof event.value === "string" &&\n        event.value.includes("CRITICAL INSTRUCTION 1:") &&\n        event.value.includes("CRITICAL INSTRUCTION 2:") &&\n        (event.value.includes("[Thought: true]") || event.value.includes("Moving Towards the Goal"))) {\n        isInvalidStream = true; // patched_prompt_leak_guard_bundle\n        continue;\n      }\n      yield event;\n      this.updateTelemetryTokenCount();\n      if (event.type === GeminiEventType.InvalidStream) {\n        isInvalidStream = true;\n      }'
+    if old_order_enum in out:
+        out = out.replace(old_order_enum, new_order_enum)
+
+    old_invalid_model_gate = re.compile(
+        r'if \(this\.config\.getContinueOnFailedApiCall\(\)\s*&&\s*isGemini2Model\(([^)]+)\)\) \{'
+    )
+    if old_invalid_model_gate.search(out):
+        out, n = old_invalid_model_gate.subn(
+            'if (this.config.getContinueOnFailedApiCall()) {',
+            out,
+        )
+        invalid_stream_model_gate_hits += n
+
     anti_demotion_core_hits += out.count("patched_no_auto_fallback_core_bundle")
     anti_demotion_ui_hits += out.count("patched_no_auto_fallback_ui_bundle")
 
@@ -188,9 +240,13 @@ if anti_demotion_core_hits == 0:
     raise RuntimeError("critical patch verification failed: bundle_disable_fallback_core")
 if anti_demotion_ui_hits == 0:
     raise RuntimeError("critical patch verification failed: bundle_disable_fallback_ui")
+if steering_guard_hits == 0 and steering_guard_present == 0:
+    raise RuntimeError("critical patch verification failed: bundle_steering_leak_guard")
+if prompt_guard_hits == 0 and prompt_guard_present == 0:
+    raise RuntimeError("critical patch verification failed: bundle_prompt_leak_guard")
 
 print(
-    f"bundle_patch_stats parent_detect={parent_detect_hits} parent_detect_present={parent_detect_present} pgrep={pgrep_hits} pgrep_present={pgrep_present} terminal_meta={terminal_meta_hits} getpty={getpty_hits} anti_demotion_core={anti_demotion_core_hits} anti_demotion_ui={anti_demotion_ui_hits}"
+    f"bundle_patch_stats parent_detect={parent_detect_hits} parent_detect_present={parent_detect_present} pgrep={pgrep_hits} pgrep_present={pgrep_present} terminal_meta={terminal_meta_hits} getpty={getpty_hits} anti_demotion_core={anti_demotion_core_hits} anti_demotion_ui={anti_demotion_ui_hits} steering_guard={steering_guard_hits} steering_guard_present={steering_guard_present} prompt_guard={prompt_guard_hits} prompt_guard_present={prompt_guard_present} invalid_stream_model_gate={invalid_stream_model_gate_hits}"
 )
 PY
 
@@ -471,9 +527,49 @@ text = text.replace(
 geminichat.write_text(text)
 
 text = client.read_text()
+text = re.sub(
+    r"if \(this\.config\.getContinueOnFailedApiCall\(\)\s*&&\s*isGemini2Model\(modelToUse\)\) \{",
+    "if (this.config.getContinueOnFailedApiCall()) {",
+    text,
+)
 text = text.replace(
     "        if (this.config.getContinueOnFailedApiCall() &&\n            isGemini2Model(modelToUse)) {",
     "        if (this.config.getContinueOnFailedApiCall()) {",
+)
+canonical_legacy_guard = """if (event.type === GeminiEventType.Content &&
+                typeof event.value === 'string' &&
+                event.value.includes('User steering update:') &&
+                event.value.includes('<user_input>') &&
+                event.value.includes('Internal instruction: Re-evaluate the active plan')) {
+                isInvalidStream = true; // patched_steering_leak_guard_legacy
+                continue;
+            }
+            if (event.type === GeminiEventType.Content &&
+                typeof event.value === 'string' &&
+                event.value.includes('CRITICAL INSTRUCTION 1:') &&
+                event.value.includes('CRITICAL INSTRUCTION 2:') &&
+                (event.value.includes('[Thought: true]') || event.value.includes('Moving Towards the Goal'))) {
+                isInvalidStream = true; // patched_prompt_leak_guard_legacy
+                continue;
+            }
+            yield event;
+            this.updateTelemetryTokenCount();
+            if (event.type === GeminiEventType.InvalidStream) {
+                isInvalidStream = true;
+            }"""
+
+if "patched_steering_leak_guard_legacy" not in text or "patched_prompt_leak_guard_legacy" not in text:
+    text = replace_once_or_skip(
+        text,
+        "yield event;\n            this.updateTelemetryTokenCount();\n            if (event.type === GeminiEventType.InvalidStream) {\n                isInvalidStream = true;\n            }",
+        canonical_legacy_guard,
+    )
+
+text, _ = re.subn(
+    r"yield event;\n\s*this\.updateTelemetryTokenCount\(\);\n(?:\s*if \(event\.type === GeminiEventType\.Content &&[\s\S]*?continue;\n\s*\})+\n\s*if \(event\.type === GeminiEventType\.InvalidStream\) \{\n\s*isInvalidStream = true;\n\s*\}",
+    canonical_legacy_guard,
+    text,
+    count=1,
 )
 text = text.replace('if (isInvalidStreamRetry) {', 'if (isInvalidStreamRetry >= 5) {')
 text = text.replace('if (isInvalidStreamRetry >= 3) {', 'if (isInvalidStreamRetry >= 5) {')
@@ -498,6 +594,8 @@ text = text.replace(
     "async *sendMessageStream(request, signal, prompt_id, turns = MAX_TURNS, isInvalidStreamRetry = 0, displayContent) {",
 )
 text = text.replace('if (!isInvalidStreamRetry) {', 'if (isInvalidStreamRetry === 0) {')
+require_contains(text, "patched_steering_leak_guard_legacy", 'client_steering_leak_guard')
+require_contains(text, "patched_prompt_leak_guard_legacy", 'client_prompt_leak_guard')
 client.write_text(text)
 
 text = toolexecutor.read_text()
