@@ -129,6 +129,15 @@ for file_path in js_files:
     src = file_path.read_text()
     out = src
 
+    # Repair previously-injected 0.42.0 loop guard variant that used an undeclared isInvalidStream symbol.
+    broken_loop_guard = 'if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isInvalidStream = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("CRITICAL INSTRUCTION 1:") &&\n        event.value.includes("CRITICAL INSTRUCTION 2:") &&\n        (event.value.includes("[Thought: true]") || event.value.includes("Moving Towards the Goal"))) {\n        isInvalidStream = true; // patched_prompt_leak_guard_bundle\n        continue;\n      }\n      yield event;\n      this.updateTelemetryTokenCount();\n      if (event.type === "error" /* Error */) {\n        isError = true;\n      }'
+    fixed_loop_guard = 'if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isError = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("CRITICAL INSTRUCTION 1:") &&\n        event.value.includes("CRITICAL INSTRUCTION 2:") &&\n        (event.value.includes("[Thought: true]") || event.value.includes("Moving Towards the Goal"))) {\n        isError = true; // patched_prompt_leak_guard_bundle\n        continue;\n      }\n      yield event;\n      this.updateTelemetryTokenCount();\n      if (event.type === "error" /* Error */) {\n        isError = true;\n      }'
+    if broken_loop_guard in out:
+        repair_count = out.count(broken_loop_guard)
+        out = out.replace(broken_loop_guard, fixed_loop_guard)
+        steering_guard_hits += repair_count
+        prompt_guard_hits += repair_count
+
     if "pgrep -g 0" in out:
         c = out.count("pgrep -g 0")
         pgrep_hits += c
@@ -200,7 +209,7 @@ for file_path in js_files:
             else:
                 # 0.42.0 bundled shape: inject both leak guards directly before yielding content events.
                 old_loop_guard = 'yield event;\n      this.updateTelemetryTokenCount();\n      if (event.type === "error" /* Error */) {\n        isError = true;\n      }'
-                new_loop_guard = 'if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isInvalidStream = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("CRITICAL INSTRUCTION 1:") &&\n        event.value.includes("CRITICAL INSTRUCTION 2:") &&\n        (event.value.includes("[Thought: true]") || event.value.includes("Moving Towards the Goal"))) {\n        isInvalidStream = true; // patched_prompt_leak_guard_bundle\n        continue;\n      }\n      yield event;\n      this.updateTelemetryTokenCount();\n      if (event.type === "error" /* Error */) {\n        isError = true;\n      }'
+                new_loop_guard = 'if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isError = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("CRITICAL INSTRUCTION 1:") &&\n        event.value.includes("CRITICAL INSTRUCTION 2:") &&\n        (event.value.includes("[Thought: true]") || event.value.includes("Moving Towards the Goal"))) {\n        isError = true; // patched_prompt_leak_guard_bundle\n        continue;\n      }\n      yield event;\n      this.updateTelemetryTokenCount();\n      if (event.type === "error" /* Error */) {\n        isError = true;\n      }'
                 if old_loop_guard in out:
                     steering_guard_hits += out.count(old_loop_guard)
                     out = out.replace(old_loop_guard, new_loop_guard)
@@ -254,9 +263,9 @@ if anti_demotion_core_hits == 0:
 if anti_demotion_ui_hits == 0:
     raise RuntimeError("critical patch verification failed: bundle_disable_fallback_ui")
 if steering_guard_hits == 0 and steering_guard_present == 0:
-    print("bundle_patch_note steering_leak_guard skipped: no compatible marker in this bundled build")
+    raise RuntimeError("critical patch verification failed: bundle_steering_leak_guard")
 if prompt_guard_hits == 0 and prompt_guard_present == 0:
-    print("bundle_patch_note prompt_leak_guard skipped: no compatible marker in this bundled build")
+    raise RuntimeError("critical patch verification failed: bundle_prompt_leak_guard")
 
 print(
     f"bundle_patch_stats parent_detect={parent_detect_hits} parent_detect_present={parent_detect_present} pgrep={pgrep_hits} pgrep_present={pgrep_present} terminal_meta={terminal_meta_hits} getpty={getpty_hits} anti_demotion_core={anti_demotion_core_hits} anti_demotion_ui={anti_demotion_ui_hits} steering_guard={steering_guard_hits} steering_guard_present={steering_guard_present} prompt_guard={prompt_guard_hits} prompt_guard_present={prompt_guard_present} invalid_stream_model_gate={invalid_stream_model_gate_hits}"
