@@ -1,6 +1,12 @@
 #!/bin/sh
 SELF_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-TARGET="$SELF_DIR/../lib/node_modules/@google/gemini-cli/dist/index.js"
+TARGET_BUNDLE="$SELF_DIR/../lib/node_modules/@google/gemini-cli/bundle/gemini.js"
+TARGET_DIST="$SELF_DIR/../lib/node_modules/@google/gemini-cli/dist/index.js"
+if [ -f "$TARGET_BUNDLE" ]; then
+  TARGET="$TARGET_BUNDLE"
+else
+  TARGET="$TARGET_DIST"
+fi
 NODE_BIN="${GEMINI_NODE_BIN:-$(command -v node 2>/dev/null || true)}"
 DIAG_ROOT="${GEMINI_DIAG_ROOT:-$HOME/.gemini/diagnostics}"
 RUNS_DIR="$DIAG_ROOT/runs"
@@ -14,7 +20,7 @@ ENABLE_RSS="${GEMINI_DIAG_ENABLE_RSS:-0}"
 DEBUG_DISABLE_RETRY="${GEMINI_DEBUG_DISABLE_RETRY:-0}"
 
 if [ ! -f "$TARGET" ]; then
-  echo "gemini wrapper: target missing: $TARGET" >&2
+  echo "gemini wrapper: target missing (checked: $TARGET_BUNDLE, $TARGET_DIST)" >&2
   exit 127
 fi
 if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then

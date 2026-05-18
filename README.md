@@ -33,10 +33,10 @@ User-local install:
 ./scripts/install-user-local.sh
 ```
 
-Install a specific version (default is `0.38.1`):
+Install a specific version (default is `0.42.0`):
 
 ```sh
-GEMINI_CLI_VERSION=0.38.1 ./scripts/install-user-local.sh
+GEMINI_CLI_VERSION=0.42.0 ./scripts/install-user-local.sh
 ```
 
 Reapply patches after reinstall:
@@ -48,6 +48,10 @@ Reapply patches after reinstall:
 Patch mode is selected automatically by installed package layout:
 - legacy `dist/` layout (0.35.x and earlier): full Alpine patch set
 - bundled `bundle/` layout (0.36+): Alpine compatibility subset for the bundled build
+
+Diagnostics wrapper entrypoint resolution is layout-aware:
+- prefers `bundle/gemini.js` when present
+- falls back to `dist/index.js` for legacy installs
 
 Reapply patches and also install diagnostics wrapper/helper:
 

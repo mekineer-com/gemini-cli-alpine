@@ -1,7 +1,7 @@
 # Gemini CLI Architecture Map (for gemini-cli-alpine maintainers)
 
-Last updated: 2026-03-20
-Target upstream: `gemini-cli` v0.34.x layout
+Last updated: 2026-05-18
+Target upstream: `gemini-cli` bundled-era layout (0.36+; validated on 0.42.x)
 
 ## Purpose
 This file is a fast orientation map for debugging and patching Gemini CLI behavior on Alpine.
