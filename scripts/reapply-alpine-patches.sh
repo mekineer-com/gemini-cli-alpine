@@ -197,6 +197,13 @@ for file_path in js_files:
             if old_guard_enum in out:
                 steering_guard_hits += out.count(old_guard_enum)
                 out = out.replace(old_guard_enum, new_guard_enum)
+            else:
+                # 0.42.0 bundled shape: inject both leak guards directly before yielding content events.
+                old_loop_guard = 'yield event;\n      this.updateTelemetryTokenCount();\n      if (event.type === "error" /* Error */) {\n        isError = true;\n      }'
+                new_loop_guard = 'if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("User steering update:") &&\n        event.value.includes("<user_input>") &&\n        event.value.includes("Internal instruction: Re-evaluate the active plan")) {\n        isInvalidStream = true; // patched_steering_leak_guard_bundle\n        continue;\n      }\n      if (event.type === "content" /* Content */ &&\n        typeof event.value === "string" &&\n        event.value.includes("CRITICAL INSTRUCTION 1:") &&\n        event.value.includes("CRITICAL INSTRUCTION 2:") &&\n        (event.value.includes("[Thought: true]") || event.value.includes("Moving Towards the Goal"))) {\n        isInvalidStream = true; // patched_prompt_leak_guard_bundle\n        continue;\n      }\n      yield event;\n      this.updateTelemetryTokenCount();\n      if (event.type === "error" /* Error */) {\n        isError = true;\n      }'
+                if old_loop_guard in out:
+                    steering_guard_hits += out.count(old_loop_guard)
+                    out = out.replace(old_loop_guard, new_loop_guard)
     steering_guard_present += out.count("patched_steering_leak_guard_bundle")
 
     if "patched_prompt_leak_guard_bundle" not in out:
